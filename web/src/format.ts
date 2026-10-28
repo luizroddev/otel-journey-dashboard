@@ -1,0 +1,67 @@
+import type { FlowStatus } from './api';
+
+const dateTime = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'medium' });
+const time = new Intl.DateTimeFormat('pt-BR', { timeStyle: 'medium' });
+const decimal = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 });
+
+export const fmtDateTime = (iso: string) => dateTime.format(new Date(iso));
+export const fmtTime = (iso: string) => time.format(new Date(iso));
+
+export function fmtDuration(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined) return '';
+  if (ms < 1) return '< 1 ms';
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 60_000) return `${decimal.format(ms / 1000)} s`;
+  const m = Math.floor(ms / 60_000);
+  const s = Math.round((ms % 60_000) / 1000);
+  if (m < 60) return `${m} min ${s.toString().padStart(2, '0')} s`;
+  return `${Math.floor(m / 60)} h ${(m % 60).toString().padStart(2, '0')} min`;
+}
+
+/** Offset from the session start, like +1:05. */
+export function fmtOffset(fromIso: string, iso: string): string {
+  const s = Math.max(0, Math.round((Date.parse(iso) - Date.parse(fromIso)) / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = (s % 60).toString().padStart(2, '0');
+  return h ? `+${h}:${m.toString().padStart(2, '0')}:${r}` : `+${m}:${r}`;
+}
+
+export const outcomeText: Record<FlowStatus, string> = {
+  success: 'Sucesso',
+  failure: 'Falhou',
+  cancelled: 'Cancelado',
+  completed: 'Concluído',
+  open: 'Sem conclusão',
+};
+
+export const outcomeHelp: Record<FlowStatus, string> = {
+  success: 'O app informou que deu certo.',
+  failure: 'Houve exceção ou o app informou que não deu certo.',
+  cancelled: 'O usuário ou o app cancelou.',
+  completed: 'O código terminou, mas o app não informou o resultado de negócio.',
+  open: 'Começou e não recebemos o fim. Pode ser app fechado, telemetria perdida ou fim não instrumentado; não indica abandono.',
+};
+
+export const shortId = (id: string, n = 8) => (id.length > n ? id.slice(0, n) : id);
+
+/** A readable name from a code: chooseBiometric -> Choose biometric. */
+export function humanize(code: string | null): string {
+  if (!code) return '';
+  const s = code
+    .replace(/^\/+/, '')
+    .replace(/[._/-]+/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .trim()
+    .toLowerCase();
+  return s ? s[0]!.toUpperCase() + s.slice(1) : code;
+}
+
+export function valueText(v: unknown): string {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+}
+
+export const platformName = (p: string) =>
+  ({ ios: 'iOS', android: 'Android', darwin: 'iOS', linux: 'Android' })[p] ?? p;
