@@ -3,6 +3,8 @@
 # OTLP receiver: http://localhost:4318   Dashboard: http://localhost:8686
 services:
   mongo:
+    # On a Linux host with kernel 6.19 to 7.0.13, MongoDB 8 does not start
+    # (TCMalloc incompatibility): use mongo:7 there, on a new volume.
     image: mongo:8
     ports: ["27017:27017"]
     volumes: [mongo-data:/data/db]
