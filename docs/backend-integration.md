@@ -29,21 +29,32 @@ Your backend:   app ──OTLP──► backend (authenticates, writes) ──�
    `server/proto`, version 1.5.0) with the protobuf tooling of your
    language, and parse `ExportTraceServiceRequest` /
    `ExportLogsServiceRequest`.
-3. **Identity.** Replace `device.id` and `user.id` with what your backend
-   authenticated, instead of trusting the payload.
-4. **Map and write.** Follow [storage-schema.md](storage-schema.md) field by
+3. **Identity.** Set `deviceId` from the device your backend authenticated
+   (a header it already checks); the app does not send `device.id`. Replace
+   `user.id` with the authenticated user when you know it, or store a keyed
+   hash (HMAC with a server secret) instead of a document number: a plain
+   hash of a small number space can be reversed by hashing every value.
+4. **Allowlist and scrubbing.** If your backend filters attributes, event
+   names or span names, accept everything in the "Receivers" section of
+   [journey.md](https://github.com/luizroddev/otel_flutter_bridge/blob/main/docs/specs/journey.md#receivers).
+   Never scrub the values of ids (`session.id`, `log.record.uid`,
+   `journey.*.instance_id`, `app.installation.id`, trace and span ids): they
+   are random hex, and about 1 in 20 contains a run of 11 or more digits, so
+   a rule for document numbers would corrupt them and break the journey.
+5. **Map and write.** Follow [storage-schema.md](storage-schema.md) field by
    field. The executable reference is `server/src/ingest/mapping.ts` and
    `server/src/store/mongo.ts`. What usually goes wrong:
    - ids must be lowercase hex (protobuf carries bytes);
    - keep time both as a BSON `Date` and as a nanosecond string;
    - attributes are a `{ key, value }` list, never an object with dotted keys;
+   - `events._id` is `{service}:{log.record.uid}`;
    - insert only when `_id` is new (`$setOnInsert` with `upsert`) and update
      `sessions` only with what was actually inserted;
    - `errorCount`: one per failed operation (a `failure` event, or a root
      span with error and no `actionInstanceId`).
-5. **Limits.** Apply body size, records per request and per-device quotas
+6. **Limits.** Apply body size, records per request and per-device quotas
    according to your own policy.
-6. **Validate.** Run the conformance check against your backend:
+7. **Validate.** Run the conformance check against your backend:
 
    ```bash
    npm run conformance -- --endpoint https://telemetry.example.com \
@@ -52,8 +63,10 @@ Your backend:   app ──OTLP──► backend (authenticates, writes) ──�
      --expect-device <device your backend will authenticate> --expect-user <user>
    ```
 
-   It sends one fictional session and checks 26 rules on what was stored.
-7. **Read.** Run this dashboard with `MODE=query` against the same MongoDB
+   It sends one fictional session twice (resends must not duplicate) and
+   checks 31 rules on what was stored. Without `--expect-device`, `deviceId`
+   must stay null.
+8. **Read.** Run this dashboard with `MODE=query` against the same MongoDB
    (a read-only user is enough), behind your SSO proxy:
 
    ```bash
@@ -78,12 +91,14 @@ When writing MongoDB from your backend is not possible yet:
    MODE=ingest TRUSTED_DEVICE_HEADER=X-Validated-Device TRUSTED_USER_HEADER=X-Validated-User npm start
    ```
 
-   These headers replace `device.id` and `user.id` from the payload.
+   The device header is the only source of `deviceId`; the user header
+   replaces `user.id` from the payload.
 4. Another instance in `MODE=query` serves the UI.
 
 ## Searching by another identifier
 
-The dashboard filters by `device.id`, `user.id` and `session.id`. When an
+The dashboard filters by device, installation (`app.installation.id`),
+user and session. When an
 investigation starts from some other identifier your organization uses,
 resolve it to a device or user in the service that already owns that lookup
 and pass the result as a filter (`/?deviceId=...`). That identifier should

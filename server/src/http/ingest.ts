@@ -7,9 +7,11 @@ import { countItems, decodeLogs, decodeTraces, successBody } from '../otlp/decod
 import { writeEvents, writeSpans, type Store } from '../store/mongo.js';
 
 /**
- * Extension point: what the receiver authenticated about the sender. The
- * default trusts the payload. A production receiver (for example a BFF)
- * returns the device and user it validated, and they replace the payload's.
+ * Extension point: what the receiver authenticated about the sender. A
+ * production receiver (for example a BFF) returns the device and user it
+ * validated: the device becomes `deviceId` and the user replaces the
+ * payload's. Without it, `deviceId` stays empty and `user.id` comes from
+ * the payload.
  */
 export type IdentityResolver = (c: Context) => IngestIdentity | undefined;
 

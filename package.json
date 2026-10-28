@@ -14,7 +14,7 @@
     "dev:web": "vite",
     "build": "vite build && tsc -p server/tsconfig.json",
     "start": "node dist/server/src/index.js",
-    "typecheck": "tsc -p server/tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
+    "typecheck": "tsc -p server/tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit && tsc -p tsconfig.scripts.json",
     "test": "vitest run",
     "seed": "tsx scripts/seed.ts",
     "conformance": "tsx scripts/conformance.ts"

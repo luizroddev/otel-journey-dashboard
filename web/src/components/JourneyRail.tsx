@@ -14,6 +14,7 @@ export function lineColor(flowCode: string | null, codes: string[]): string {
 
 export function stepTitle(s: JourneyStep): string {
   if (s.label) return s.label;
+  if (s.kind === 'session') return s.previousSessionId ? 'Nova sessão, continua a anterior' : 'Início da sessão';
   if (s.kind === 'event') return s.eventName ?? 'Evento';
   return humanize(s.code);
 }
@@ -40,7 +41,8 @@ export function JourneyRail({ steps, flows, sessionStart, selected, onSelect }: 
   return (
     <ol className="rail" aria-label="Jornada da sessão">
       {steps.map((s) => {
-        const run = s.flowInstanceId ? runs.get(s.flowInstanceId) : undefined;
+        // A session start is never part of a flow, even in the middle of one.
+        const run = s.flowInstanceId && s.kind !== 'session' ? runs.get(s.flowInstanceId) : undefined;
         const style = { '--line': lineColor(run?.code ?? null, codes) } as CSSProperties;
         const isSelected = selected === s.id;
         const common = {
@@ -72,6 +74,7 @@ export function JourneyRail({ steps, flows, sessionStart, selected, onSelect }: 
                 <span>
                   {run?.label ?? humanize(s.code)} terminou: <strong className={`text-${status}`}>{outcomeText[status]}</strong>
                 </span>
+                {s.outcomeReason && <span className="reason mono">{s.outcomeReason}</span>}
                 {s.durationMs !== null && <span className="dur">{fmtDuration(s.durationMs)}</span>}
               </button>
             </li>
@@ -92,6 +95,7 @@ export function JourneyRail({ steps, flows, sessionStart, selected, onSelect }: 
                 {s.outcome && s.kind === 'action' && (
                   <span className={`pill ${s.outcome}`} title={outcomeHelp[s.outcome]}>{outcomeText[s.outcome]}</span>
                 )}
+                {s.outcomeReason && <span className="reason mono">{s.outcomeReason}</span>}
                 {s.errorType && <span className="error-type mono">{s.errorType}</span>}
                 {s.extra.length > 0 && <span className="extra">{extraText(s)}</span>}
                 {s.source === 'native' && <span className="origin">nativo</span>}

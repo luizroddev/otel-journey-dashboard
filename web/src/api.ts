@@ -10,7 +10,10 @@ export interface Attr {
 
 export interface SessionSummary {
   _id: string;
+  /** Stamped by the receiver from what it authenticated; null otherwise. */
   deviceId: string | null;
+  installationId: string | null;
+  previousSessionId: string | null;
   userIds: string[];
   services: string[];
   versions: string[];
@@ -29,7 +32,7 @@ export interface SessionsPage {
   period: { from: string; to: string; clamped: boolean };
 }
 
-export type StepKind = 'screen' | 'action' | 'flowStart' | 'flowEnd' | 'event';
+export type StepKind = 'session' | 'screen' | 'action' | 'flowStart' | 'flowEnd' | 'event';
 
 export interface JourneyStep {
   id: string;
@@ -45,12 +48,14 @@ export interface JourneyStep {
   actionInstanceId: string | null;
   measured: boolean;
   outcome: Outcome | null;
+  outcomeReason: string | null;
   durationMs: number | null;
   errorType: string | null;
   traceId: string | null;
   spanId: string | null;
   source: string | null;
   userId: string | null;
+  previousSessionId: string | null;
   extra: Attr[];
 }
 
@@ -61,6 +66,7 @@ export interface FlowRun {
   start: string | null;
   end: string | null;
   status: FlowStatus;
+  reason: string | null;
   durationMs: number | null;
   attempt: number;
   steps: number;

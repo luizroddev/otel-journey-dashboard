@@ -20,9 +20,10 @@ export interface Config {
   ingestToken: string | null;
   /**
    * Headers set by a trusted proxy in front of the receiver (for example a
-   * BFF) with the device and user it authenticated. They replace
-   * `device.id` / `user.id` from the payload. Only set these when the
-   * receiver is not reachable without that proxy.
+   * BFF) with the device and user it authenticated. The device header is
+   * the only source of `deviceId`; the user header replaces `user.id` from
+   * the payload. Only set these when the receiver is not reachable without
+   * that proxy.
    */
   trustedDeviceHeader: string | null;
   trustedUserHeader: string | null;

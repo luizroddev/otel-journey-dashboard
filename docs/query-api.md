@@ -14,7 +14,7 @@ Errors: `{ "error": "<message>" }` with 400 (invalid parameters), 401, 404.
 | Parameter | Default | |
 |---|---|---|
 | `from`, `to` | last 24 h | ISO 8601. Window clamped to `MAX_WINDOW_DAYS` (31) |
-| `deviceId`, `userId`, `sessionId` | | exact match |
+| `deviceId`, `installationId`, `userId`, `sessionId` | | exact match |
 | `service`, `version`, `platform`, `environment` | | exact match |
 | `onlyErrors` | `false` | `true`: `errorCount > 0` |
 | `limit` | 50 | at most `MAX_PAGE_SIZE` (200) |
@@ -24,7 +24,8 @@ Sessions whose `lastSeen` falls in the window, newest first.
 
 ```json
 {
-  "items": [ { "_id": "…", "deviceId": "…", "userIds": [], "firstSeen": "…", "lastSeen": "…",
+  "items": [ { "_id": "…", "deviceId": null, "installationId": "…", "previousSessionId": null,
+               "userIds": [], "firstSeen": "…", "lastSeen": "…",
                "eventCount": 15, "spanCount": 6, "errorCount": 1, "services": [], "versions": [],
                "platforms": [], "environments": [] } ],
   "nextBefore": "2026-10-28T12:00:00.000Z",
@@ -43,16 +44,17 @@ The session summary, or 404.
   "session": { },
   "steps": [ {
     "id": "…", "time": "…", "timeNs": "…",
-    "kind": "screen | action | flowStart | flowEnd | event",
-    "eventName": "app.action", "code": "confirmLogin", "label": "Confirmou o login",
+    "kind": "session | screen | action | flowStart | flowEnd | event",
+    "eventName": "journey.action", "code": "confirmLogin", "label": "Confirmou o login",
     "screen": "login", "flow": "login", "flowInstanceId": "…", "actionInstanceId": "…",
-    "measured": true, "outcome": "failure", "durationMs": 675, "errorType": "401",
-    "traceId": "…", "spanId": "…", "source": "dart", "userId": null,
+    "measured": true, "outcome": "failure", "outcomeReason": "invalidPassword",
+    "durationMs": 675, "errorType": "401",
+    "traceId": "…", "spanId": "…", "source": "dart", "userId": null, "previousSessionId": null,
     "extra": [ { "key": "app.login.attempt", "value": 1 } ]
   } ],
   "flows": [ {
     "instanceId": "…", "code": "login", "label": "Login", "start": "…", "end": "…",
-    "status": "success | failure | cancelled | completed | open",
+    "status": "success | failure | cancelled | completed | open", "reason": null,
     "durationMs": 5400, "attempt": 1, "steps": 6, "failures": 1
   } ],
   "otherTraces": [ { "traceId": "…", "name": "GET", "start": "…", "durationMs": 12, "statusCode": 0, "screen": "home" } ],
@@ -60,8 +62,11 @@ The session summary, or 404.
 }
 ```
 
-- `steps` are ordered by `timeNs`; on equal times a flow starts before what
-  happens in it and ends after.
+- `steps` are ordered by `timeNs`; on equal times the session starts first,
+  and a flow starts before what happens in it and ends after.
+- `kind: session` is a `session.start` event; `previousSessionId` links the
+  session it continues. It never counts as a step of a flow.
+- `outcomeReason` / `flows[].reason` come from `journey.outcome_reason`.
 - `flows[].status` is `open` when a start arrived and no end did. The UI
   shows it as "no conclusion", never as abandoned.
 - `flows[].attempt` counts runs of the same flow code in the session.

@@ -7,7 +7,10 @@ import type { OtlpLogRecord, OtlpScope, OtlpSpan, ResourceGroup } from '../otlp/
 
 /** What the receiver knows about the sender, beyond the payload. */
 export interface IngestIdentity {
-  /** Overrides `device.id` from the payload (for example from an authenticated header). */
+  /**
+   * The device the receiver authenticated (for example from a header it
+   * checks). The only source of `deviceId`: the payload never sets it.
+   */
   deviceId?: string | null;
   /** Overrides `user.id` from the payload. */
   userId?: string | null;
@@ -64,7 +67,8 @@ function common(
     serviceVersion: str(r(Keys.serviceVersion)),
     environment: str(r(Keys.environment)),
     platform: str(r(Keys.osName)) ?? str(r(Keys.osType)),
-    deviceId: id?.deviceId !== undefined ? id.deviceId : both(Keys.deviceId),
+    deviceId: id?.deviceId ?? null,
+    installationId: str(r(Keys.installationId)),
     sessionId: both(Keys.sessionId),
     userId: id?.userId !== undefined ? id.userId : both(Keys.userId),
     screen: str(a(Keys.screen)),
@@ -73,6 +77,7 @@ function common(
     actionName: str(a(Keys.action)),
     actionInstanceId: str(a(Keys.actionInstanceId)),
     outcome: outcome && OUTCOMES.has(outcome as Outcome) ? (outcome as Outcome) : null,
+    outcomeReason: str(a(Keys.outcomeReason)),
     errorType: str(a(Keys.errorType)),
     source: str(a(Keys.source)),
     resource,
@@ -122,9 +127,10 @@ export function mapLogs(groups: ResourceGroup<OtlpLogRecord>[], opts: MapOptions
         const c = common(g.resource, rec.attributes, s.scope, opts);
         const a = lookup(rec.attributes);
         const timeNs = rec.timeNs !== '0' ? rec.timeNs : rec.observedTimeNs;
+        const uid = str(a(Keys.logRecordUid));
         out.push({
           ...c,
-          _id: digest(g.resource, s.scope, rec),
+          _id: uid ? `${c.service ?? ''}:${uid}` : digest(g.resource, s.scope, rec),
           time: nsToDate(timeNs),
           timeNs,
           eventName: rec.eventName ?? str(a(Keys.eventName)),
@@ -143,7 +149,7 @@ export function mapLogs(groups: ResourceGroup<OtlpLogRecord>[], opts: MapOptions
   return out;
 }
 
-/** Stable id of a log record: identical resends map to the same document. */
+/** Id of a log record without `log.record.uid`: identical resends map to the same document. */
 function digest(resource: Attr[], scope: OtlpScope, rec: OtlpLogRecord): string {
   return createHash('sha256')
     .update(JSON.stringify([resource, scope, rec]))
