@@ -210,6 +210,8 @@ export const Keys = {
   durationMs: 'journey.duration_ms',
   errorType: 'error.type',
   source: 'otel_flutter_bridge.source',
+  iosAppState: 'ios.app.state',
+  androidAppState: 'android.app.state',
 } as const;
 
 /** Keys stored as fields of `spans` and `events`. */
@@ -257,4 +259,5 @@ export const EventNames = {
   action: 'journey.action',
   flowStart: 'journey.flow.start',
   flowEnd: 'journey.flow.end',
+  appLifecycle: 'device.app.lifecycle',
 } as const;

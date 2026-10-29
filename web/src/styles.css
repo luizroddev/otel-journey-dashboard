@@ -615,6 +615,10 @@ table.sessions {
   align-items: baseline;
   gap: 0.45rem;
 }
+.kind-lifecycle .stop-title {
+  color: var(--muted);
+  font-style: italic;
+}
 .kind-screen .stop-title {
   font-weight: 600;
   font-size: var(--t-md);

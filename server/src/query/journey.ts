@@ -3,7 +3,7 @@
 import type { Attr, EventDoc, Outcome, SpanDoc } from '../model.js';
 import { EventNames, Keys } from '../model.js';
 
-export type StepKind = 'session' | 'screen' | 'action' | 'flowStart' | 'flowEnd' | 'event';
+export type StepKind = 'session' | 'screen' | 'action' | 'flowStart' | 'flowEnd' | 'lifecycle' | 'event';
 
 export interface JourneyStep {
   id: string;
@@ -82,6 +82,8 @@ function kindOf(name: string | null): StepKind {
       return 'flowStart';
     case EventNames.flowEnd:
       return 'flowEnd';
+    case EventNames.appLifecycle:
+      return 'lifecycle';
     default:
       return 'event';
   }
@@ -94,15 +96,17 @@ export function toStep(e: EventDoc): JourneyStep {
       ? e.screen
       : kind === 'action'
         ? e.actionName
-        : kind === 'event' || kind === 'session'
-          ? e.eventName
-          : e.flow;
+        : kind === 'lifecycle'
+          ? appState(e)
+          : kind === 'event' || kind === 'session'
+            ? e.eventName
+            : e.flow;
   const label =
     kind === 'screen'
       ? e.screenLabel
       : kind === 'action'
         ? e.actionLabel
-        : kind === 'event' || kind === 'session'
+        : kind === 'event' || kind === 'session' || kind === 'lifecycle'
           ? null
           : e.flowLabel;
   return {
@@ -131,6 +135,12 @@ export function toStep(e: EventDoc): JourneyStep {
   };
 }
 
+/** `background`, `foreground`, `terminate`... of a `device.app.lifecycle` event. */
+function appState(e: EventDoc): string | null {
+  const v = e.attributes.find((a) => a.key === Keys.iosAppState || a.key === Keys.androidAppState)?.value;
+  return typeof v === 'string' && v ? v : null;
+}
+
 function previousSessionId(e: EventDoc): string | null {
   const v = e.attributes.find((a) => a.key === Keys.sessionPreviousId)?.value;
   return typeof v === 'string' && v ? v : null;
@@ -143,7 +153,7 @@ function compareNs(a: string, b: string): number {
 
 // On equal timestamps the session starts first, a flow starts before what
 // happens in it and ends after.
-const TIE: Record<StepKind, number> = { session: -1, flowStart: 0, screen: 1, action: 1, event: 1, flowEnd: 2 };
+const TIE: Record<StepKind, number> = { session: -1, flowStart: 0, screen: 1, action: 1, lifecycle: 1, event: 1, flowEnd: 2 };
 
 export function buildJourney(events: EventDoc[], rootSpans: SpanDoc[]): JourneyView {
   const steps = events

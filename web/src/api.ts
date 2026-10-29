@@ -34,7 +34,7 @@ export interface SessionsPage {
   period: { from: string; to: string; clamped: boolean };
 }
 
-export type StepKind = 'session' | 'screen' | 'action' | 'flowStart' | 'flowEnd' | 'event';
+export type StepKind = 'session' | 'screen' | 'action' | 'flowStart' | 'flowEnd' | 'lifecycle' | 'event';
 
 export interface JourneyStep {
   id: string;

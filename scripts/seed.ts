@@ -86,6 +86,7 @@ for (const start of starts) {
     paymentMs: latency(slowPayments ? 1600 : 900),
     checkoutOpen: chance(0.04),
     returns: chance(0.06) ? pick([['success', 16], ['cancelled', 3], ['failure', 1]]) : undefined,
+    leavesApp: chance(0.25),
   });
   last.set(installationId, s.sessionId);
   sessions.push(s);

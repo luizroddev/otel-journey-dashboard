@@ -112,8 +112,10 @@ When writing MongoDB from your backend is not possible yet:
    MODE=ingest TRUSTED_DEVICE_HEADER=X-Validated-Device TRUSTED_USER_HEADER=X-Validated-User npm start
    ```
 
-   The device header is the only source of `deviceId`; the user header
-   replaces `user.id` from the payload.
+   The device header is the only source of `deviceId`. The user header
+   replaces `user.id` on the records that carry one: events from before the
+   login keep none, even when the app sends them after logging in, and a
+   request without the header keeps the payload's value.
 4. Another instance in `MODE=query` aggregates and serves the UI.
 
 ## Searching by several devices

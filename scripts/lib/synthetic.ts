@@ -57,6 +57,8 @@ export interface SyntheticOptions {
   checkoutOpen?: boolean;
   /** Run a return flow ending this way. */
   returns?: 'success' | 'cancelled' | 'failure';
+  /** The user leaves the app after a failed login and comes back (iOS lifecycle events). */
+  leavesApp?: boolean;
 }
 
 export interface SyntheticSession {
@@ -231,6 +233,12 @@ export function syntheticSession(o: SyntheticOptions): SyntheticSession {
       { 'app.login.attempt': attempt++ },
       'invalidPassword',
     );
+    if (o.leavesApp && (o.platform ?? 'ios') === 'ios') {
+      event('device.app.lifecycle', { 'ios.app.state': 'background', 'otel_flutter_bridge.source': 'native' });
+      t += 45_000;
+      event('device.app.lifecycle', { 'ios.app.state': 'foreground', 'otel_flutter_bridge.source': 'native' });
+      t += 1_500;
+    }
     instant('retry', 'Tentou novamente');
   }
   const loginOk = !o.loginFails;

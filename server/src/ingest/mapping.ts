@@ -13,7 +13,12 @@ export interface IngestIdentity {
    * checks). The only source of `deviceId`: the payload never sets it.
    */
   deviceId?: string | null;
-  /** Overrides `user.id` from the payload. */
+  /**
+   * The user the receiver authenticated. Replaces `user.id` only on records
+   * that carry one: events from before the login keep none, even when they
+   * arrive in the same request as later ones, and a request without it
+   * keeps the payload's value.
+   */
   userId?: string | null;
 }
 
@@ -52,6 +57,10 @@ function num(v: AttrValue | undefined): number | null {
   return null;
 }
 
+function authenticatedUser(payload: string | null, authenticated: string | null | undefined): string | null {
+  return payload !== null && authenticated ? authenticated : payload;
+}
+
 /** The attributes that did not become fields. */
 export function rest(list: Attr[], projected: Set<string>): Attr[] {
   return list.filter((a) => !projected.has(a.key));
@@ -76,7 +85,7 @@ function common(
     deviceId: id?.deviceId ?? null,
     installationId: str(r(Keys.installationId)),
     sessionId: both(Keys.sessionId),
-    userId: id?.userId !== undefined ? id.userId : both(Keys.userId),
+    userId: authenticatedUser(both(Keys.userId), id?.userId),
     screen: str(a(Keys.screen)),
     flow: str(a(Keys.flow)),
     flowInstanceId: str(a(Keys.flowInstanceId)),

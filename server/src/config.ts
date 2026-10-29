@@ -37,7 +37,8 @@ export interface Config {
   /**
    * Headers set by a trusted proxy in front of the receiver (for example a
    * BFF) with the device and user it authenticated. The device header is
-   * the only source of `deviceId`; the user header replaces `user.id` from
+   * the only source of `deviceId`; the user header replaces `user.id` on the
+   * records that carry one (never on events from before the login) from
    * the payload. Only set these when the receiver is not reachable without
    * that proxy.
    */
