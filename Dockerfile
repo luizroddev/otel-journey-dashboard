@@ -12,5 +12,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 COPY server/proto ./server/proto
+COPY LICENSE THIRD_PARTY_NOTICES.md ./
+COPY licenses ./licenses
 EXPOSE 4318 8686
 CMD ["node", "dist/server/src/index.js"]
