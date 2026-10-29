@@ -59,7 +59,7 @@ describe.skipIf(!url)('MongoDB end to end', () => {
   };
 
   it('ingests a session and serves its journey and traces', async () => {
-    const s = syntheticSession({ start: Date.now() - 60_000, deviceId: 'device-e2e', userId: 'user-e2e' });
+    const s = syntheticSession({ start: Date.now() - 60_000, installationId: 'install-e2e', userId: 'user-e2e' });
     expect((await post('/v1/traces', encode('traces', s.traces))).status).toBe(200);
     // gzip, like most OTLP exporters send
     const logs = await post('/v1/logs', gzipSync(encode('logs', s.logs)), { 'content-encoding': 'gzip' });
@@ -70,11 +70,14 @@ describe.skipIf(!url)('MongoDB end to end', () => {
     await post('/v1/logs', encode('logs', s.logs));
     await post('/v1/traces', encode('traces', s.traces));
 
-    const list = await get('sessions?deviceId=device-e2e');
+    const list = await get('sessions?installationId=install-e2e');
     expect(list.status).toBe(200);
     expect(list.body.items).toHaveLength(1);
     const summary = list.body.items[0];
     expect(summary._id).toBe(s.sessionId);
+    expect(summary.installationId).toBe('install-e2e');
+    expect(summary.deviceId).toBeNull();
+    expect(summary.previousSessionId).toBeNull();
     expect(summary.eventCount).toBe(s.counts.events);
     // Backend spans carry no session.id: they are stored, not counted.
     expect(summary.spanCount).toBe((s.counts.spans / 3) * 2);
@@ -84,7 +87,7 @@ describe.skipIf(!url)('MongoDB end to end', () => {
     expect(summary.errorCount).toBe(1);
 
     expect((await get('sessions?userId=user-e2e')).body.items).toHaveLength(1);
-    expect((await get('sessions?onlyErrors=true&deviceId=device-e2e')).body.items).toHaveLength(1);
+    expect((await get('sessions?onlyErrors=true&installationId=install-e2e')).body.items).toHaveLength(1);
     expect((await get('sessions?userId=nobody')).body.items).toHaveLength(0);
 
     const journey = await get(`sessions/${s.sessionId}/journey`);
@@ -99,6 +102,17 @@ describe.skipIf(!url)('MongoDB end to end', () => {
     expect(trace.body.rows.map((r: any) => r.depth)).toEqual([0, 1, 2]);
     expect(trace.body.events).toHaveLength(1);
     expect(trace.body.errorCount).toBeGreaterThan(0);
+
+    // The next session of the installation links back through session.start.
+    const next = syntheticSession({
+      start: Date.now() - 30_000,
+      installationId: 'install-e2e-next',
+      userId: 'user-e2e',
+      previousSessionId: s.sessionId,
+    });
+    await post('/v1/logs', encode('logs', next.logs));
+    const linked = (await get('sessions?installationId=install-e2e-next')).body.items[0];
+    expect(linked.previousSessionId).toBe(s.sessionId);
 
     const facets = await get('facets');
     expect(facets.body.services).toContain('demo-shop');

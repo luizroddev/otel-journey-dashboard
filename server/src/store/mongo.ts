@@ -2,6 +2,7 @@
 // indexes, writes from ingestion and reads for the query API.
 import { MongoClient, type Collection, type Db, type Filter, type AnyBulkWriteOperation } from 'mongodb';
 import type { EventDoc, SessionDoc, SpanDoc } from '../model.js';
+import { EventNames, Keys } from '../model.js';
 
 export interface Store {
   db: Db;
@@ -36,6 +37,7 @@ export async function ensureIndexes(s: Store): Promise<void> {
     s.events.createIndexes([
       { key: { sessionId: 1, time: 1 } },
       { key: { deviceId: 1, time: -1 } },
+      { key: { installationId: 1, time: -1 } },
       { key: { userId: 1, time: -1 } },
       { key: { traceId: 1 } },
       { key: { outcome: 1, time: -1 } },
@@ -44,6 +46,7 @@ export async function ensureIndexes(s: Store): Promise<void> {
     s.sessions.createIndexes([
       { key: { lastSeen: -1 } },
       { key: { deviceId: 1, lastSeen: -1 } },
+      { key: { installationId: 1, lastSeen: -1 } },
       { key: { userIds: 1, lastSeen: -1 } },
       { key: { expireAt: 1 }, expireAfterSeconds: 0 },
     ]),
@@ -68,6 +71,8 @@ export async function writeSpans(s: Store, docs: SpanDoc[]): Promise<number> {
   await updateSessions(s, inserted.map((d) => ({
     sessionId: d.sessionId,
     deviceId: d.deviceId,
+    installationId: d.installationId,
+    previousSessionId: null,
     userId: d.userId,
     service: d.service,
     version: d.serviceVersion,
@@ -90,6 +95,8 @@ export async function writeEvents(s: Store, docs: EventDoc[]): Promise<number> {
   await updateSessions(s, inserted.map((d) => ({
     sessionId: d.sessionId,
     deviceId: d.deviceId,
+    installationId: d.installationId,
+    previousSessionId: d.eventName === EventNames.sessionStart ? previousId(d) : null,
     userId: d.userId,
     service: d.service,
     version: d.serviceVersion,
@@ -105,9 +112,16 @@ export async function writeEvents(s: Store, docs: EventDoc[]): Promise<number> {
   return inserted.length;
 }
 
+function previousId(d: EventDoc): string | null {
+  const v = d.attributes.find((a) => a.key === Keys.sessionPreviousId)?.value;
+  return typeof v === 'string' && v && v !== d.sessionId ? v : null;
+}
+
 interface SessionTouch {
   sessionId: string | null;
   deviceId: string | null;
+  installationId: string | null;
+  previousSessionId: string | null;
   userId: string | null;
   service: string | null;
   version: string | null;
@@ -134,7 +148,14 @@ async function updateSessions(s: Store, touches: SessionTouch[]): Promise<void> 
       [...new Set(list.map(f).filter((v): v is string => !!v))];
     const first = new Date(Math.min(...list.map((t) => t.time.getTime())));
     const last = new Date(Math.max(...list.map((t) => t.end.getTime())));
-    const device = list.find((t) => t.deviceId)?.deviceId ?? null;
+    // Identity fields take a value when the batch has one; null until then.
+    const set: Record<string, string> = {};
+    const onInsert: Record<string, null> = {};
+    for (const field of ['deviceId', 'installationId', 'previousSessionId'] as const) {
+      const v = list.find((t) => t[field])?.[field];
+      if (v) set[field] = v;
+      else onInsert[field] = null;
+    }
     ops.push({
       updateOne: {
         filter: { _id: id },
@@ -153,7 +174,8 @@ async function updateSessions(s: Store, touches: SessionTouch[]): Promise<void> 
             platforms: { $each: values((t) => t.platform) },
             environments: { $each: values((t) => t.environment) },
           },
-          ...(device ? { $set: { deviceId: device } } : { $setOnInsert: { deviceId: null } }),
+          ...(Object.keys(set).length ? { $set: set } : {}),
+          ...(Object.keys(onInsert).length ? { $setOnInsert: onInsert } : {}),
         },
         upsert: true,
       },
@@ -166,6 +188,7 @@ export interface SessionQuery {
   from: Date;
   to: Date;
   deviceId?: string;
+  installationId?: string;
   userId?: string;
   sessionId?: string;
   service?: string;
@@ -185,6 +208,7 @@ export async function listSessions(s: Store, q: SessionQuery): Promise<SessionDo
   };
   if (q.sessionId) f._id = q.sessionId;
   if (q.deviceId) f.deviceId = q.deviceId;
+  if (q.installationId) f.installationId = q.installationId;
   if (q.userId) f.userIds = q.userId;
   if (q.service) f.services = q.service;
   if (q.version) f.versions = q.version;

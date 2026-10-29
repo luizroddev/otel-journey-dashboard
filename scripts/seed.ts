@@ -21,19 +21,25 @@ async function send(signal: 'traces' | 'logs', body: Uint8Array) {
   if (!r.ok) throw new Error(`${signal}: HTTP ${r.status} ${await r.text()}`);
 }
 
-const devices = ['demo-device-1', 'demo-device-2', 'demo-device-3', 'demo-device-4', 'demo-device-5'];
+const installs = ['demo-install-1', 'demo-install-2', 'demo-install-3', 'demo-install-4', 'demo-install-5'];
 const now = Date.now();
+const last = new Map<string, string>();
 for (let i = 0; i < total; i++) {
+  const installationId = installs[i % installs.length]!;
   const s = syntheticSession({
     start: now - (total - i) * 17 * 60_000,
-    deviceId: devices[i % devices.length]!,
-    userId: `demo-user-${(i % devices.length) + 1}`,
+    installationId,
+    // Every other later session continues the previous one of its
+    // installation (the app stayed open and the session expired).
+    previousSessionId: i % 2 === 0 ? last.get(installationId) : undefined,
+    userId: `demo-user-${(i % installs.length) + 1}`,
     platform: i % 3 === 0 ? 'android' : 'ios',
     version: i % 4 === 0 ? '1.3.2' : '1.4.0',
     loginFails: i % 7 === 3,
     paymentFails: i % 5 === 2,
     checkoutOpen: i % 6 === 4,
   });
+  last.set(installationId, s.sessionId);
   await send('traces', encode('traces', s.traces));
   await send('logs', encode('logs', s.logs));
   console.log(`session ${s.sessionId}  ${s.counts.events} events, ${s.counts.spans} spans`);

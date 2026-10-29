@@ -1,9 +1,9 @@
 // Builds the journey of a session from its events: ordered steps, flow runs
 // with their attempts, and traces not linked to any step. Pure.
 import type { Attr, EventDoc, Outcome, SpanDoc } from '../model.js';
-import { EventNames } from '../model.js';
+import { EventNames, Keys } from '../model.js';
 
-export type StepKind = 'screen' | 'action' | 'flowStart' | 'flowEnd' | 'event';
+export type StepKind = 'session' | 'screen' | 'action' | 'flowStart' | 'flowEnd' | 'event';
 
 export interface JourneyStep {
   id: string;
@@ -20,12 +20,16 @@ export interface JourneyStep {
   /** Measured actions (`Journey.track`) have a duration and a trace. */
   measured: boolean;
   outcome: Outcome | null;
+  /** `journey.outcome_reason`, a fixed code from the app (`invalidPassword`). */
+  outcomeReason: string | null;
   durationMs: number | null;
   errorType: string | null;
   traceId: string | null;
   spanId: string | null;
   source: string | null;
   userId: string | null;
+  /** On a `session` step: the session this one follows, when known. */
+  previousSessionId: string | null;
   /** App attributes beyond the journey contract (`app.login.method`, ...). */
   extra: Attr[];
 }
@@ -40,6 +44,8 @@ export interface FlowRunView {
   end: string | null;
   /** `open` = started, no end received: no conclusion, not "abandoned". */
   status: FlowStatus;
+  /** `journey.outcome_reason` of the end, when given. */
+  reason: string | null;
   durationMs: number | null;
   /** 1 for the first run of this flow in the session, 2 for the next... */
   attempt: number;
@@ -62,27 +68,12 @@ export interface JourneyView {
   otherTraces: OtherTrace[];
 }
 
-const CONTRACT_KEYS = new Set([
-  'event.name',
-  'session.id',
-  'user.id',
-  'device.id',
-  'otel_flutter_bridge.source',
-  'app.screen.name',
-  'app.screen.label',
-  'app.flow.name',
-  'app.flow.label',
-  'app.flow.instance_id',
-  'app.action.name',
-  'app.action.label',
-  'app.action.instance_id',
-  'app.outcome',
-  'app.duration_ms',
-  'error.type',
-]);
+const CONTRACT_KEYS = new Set<string>(Object.values(Keys));
 
 function kindOf(name: string | null): StepKind {
   switch (name) {
+    case EventNames.sessionStart:
+      return 'session';
     case EventNames.screenView:
       return 'screen';
     case EventNames.action:
@@ -99,8 +90,21 @@ function kindOf(name: string | null): StepKind {
 export function toStep(e: EventDoc): JourneyStep {
   const kind = kindOf(e.eventName);
   const code =
-    kind === 'screen' ? e.screen : kind === 'action' ? e.actionName : kind === 'event' ? e.eventName : e.flow;
-  const label = kind === 'screen' ? e.screenLabel : kind === 'action' ? e.actionLabel : kind === 'event' ? null : e.flowLabel;
+    kind === 'screen'
+      ? e.screen
+      : kind === 'action'
+        ? e.actionName
+        : kind === 'event' || kind === 'session'
+          ? e.eventName
+          : e.flow;
+  const label =
+    kind === 'screen'
+      ? e.screenLabel
+      : kind === 'action'
+        ? e.actionLabel
+        : kind === 'event' || kind === 'session'
+          ? null
+          : e.flowLabel;
   return {
     id: e._id,
     time: e.time.toISOString(),
@@ -115,14 +119,21 @@ export function toStep(e: EventDoc): JourneyStep {
     actionInstanceId: e.actionInstanceId,
     measured: kind === 'action' && e.durationMs !== null && !!e.traceId,
     outcome: e.outcome,
+    outcomeReason: e.outcomeReason,
     durationMs: e.durationMs,
     errorType: e.errorType,
     traceId: e.traceId,
     spanId: e.spanId,
     source: e.source,
     userId: e.userId,
+    previousSessionId: kind === 'session' ? previousSessionId(e) : null,
     extra: e.attributes.filter((a) => !CONTRACT_KEYS.has(a.key)),
   };
+}
+
+function previousSessionId(e: EventDoc): string | null {
+  const v = e.attributes.find((a) => a.key === Keys.sessionPreviousId)?.value;
+  return typeof v === 'string' && v ? v : null;
 }
 
 function compareNs(a: string, b: string): number {
@@ -130,8 +141,9 @@ function compareNs(a: string, b: string): number {
   return d < 0n ? -1 : d > 0n ? 1 : 0;
 }
 
-// On equal timestamps a flow starts before what happens in it and ends after.
-const TIE: Record<StepKind, number> = { flowStart: 0, screen: 1, action: 1, event: 1, flowEnd: 2 };
+// On equal timestamps the session starts first, a flow starts before what
+// happens in it and ends after.
+const TIE: Record<StepKind, number> = { session: -1, flowStart: 0, screen: 1, action: 1, event: 1, flowEnd: 2 };
 
 export function buildJourney(events: EventDoc[], rootSpans: SpanDoc[]): JourneyView {
   const steps = events
@@ -150,6 +162,7 @@ export function buildJourney(events: EventDoc[], rootSpans: SpanDoc[]): JourneyV
         start: null,
         end: null,
         status: 'open',
+        reason: null,
         durationMs: null,
         attempt: 0,
         steps: 0,
@@ -161,7 +174,8 @@ export function buildJourney(events: EventDoc[], rootSpans: SpanDoc[]): JourneyV
     return r;
   };
   for (const s of steps) {
-    if (!s.flowInstanceId) continue;
+    // A session start is not a step of the flow it happened in.
+    if (!s.flowInstanceId || s.kind === 'session') continue;
     const r = run(s.flowInstanceId, s);
     r.code ??= s.flow;
     if (s.kind === 'flowStart') {
@@ -171,6 +185,7 @@ export function buildJourney(events: EventDoc[], rootSpans: SpanDoc[]): JourneyV
       r.end = s.time;
       r.label ??= s.label;
       r.status = s.outcome ?? 'completed';
+      r.reason = s.outcomeReason;
       r.durationMs = s.durationMs;
     } else {
       r.steps++;

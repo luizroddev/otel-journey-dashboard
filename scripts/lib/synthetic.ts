@@ -1,6 +1,7 @@
-// Synthetic OTLP data shaped like what otel_flutter_bridge sends (see its
-// docs/specs/journey.md): a fictional shop where login fails once, the
-// retry works, then a purchase. No real app, user or device is involved.
+// Synthetic OTLP data shaped like what otel_flutter_bridge sends (journey
+// contract version 2, see its docs/specs/journey.md): a fictional shop where
+// login fails once, the retry works, then a purchase. No real app, user or
+// device is involved.
 import { randomBytes } from 'node:crypto';
 import { otlpTypes } from '../../server/src/otlp/decode.js';
 
@@ -28,9 +29,12 @@ const ns = (ms: number) => (BigInt(Math.round(ms * 1000)) * 1000n).toString();
 export interface SyntheticOptions {
   /** Start of the session, ms since epoch. */
   start: number;
-  deviceId: string;
+  /** `app.installation.id` of the fictional app. */
+  installationId: string;
   userId: string;
   sessionId?: string;
+  /** Session this one follows (`session.previous_id` on `session.start`). */
+  previousSessionId?: string;
   platform?: 'ios' | 'android';
   version?: string;
   /** Whether the login retry also fails (the session never logs in). */
@@ -59,7 +63,7 @@ export function syntheticSession(o: SyntheticOptions): SyntheticSession {
       'deployment.environment.name': 'local',
       'os.name': platform,
       'os.type': platform === 'ios' ? 'darwin' : 'linux',
-      'device.id': o.deviceId,
+      'app.installation.id': o.installationId,
     }),
   };
   const spans: Record<string, unknown>[] = [];
@@ -73,8 +77,8 @@ export function syntheticSession(o: SyntheticOptions): SyntheticSession {
     'session.id': sessionId,
     'user.id': user,
     'app.screen.name': screen,
-    'app.flow.name': flow?.name,
-    'app.flow.instance_id': flow?.id,
+    'journey.flow.name': flow?.name,
+    'journey.flow.instance_id': flow?.id,
     'otel_flutter_bridge.source': 'dart',
   });
   const event = (name: string, extra: Record<string, V | null | undefined>, at = t, trace?: { traceId: string; spanId: string }) => {
@@ -83,7 +87,7 @@ export function syntheticSession(o: SyntheticOptions): SyntheticSession {
       observedTimeUnixNano: ns(at + 5),
       severityNumber: 9,
       severityText: 'INFO',
-      attributes: attrs({ 'event.name': name, ...ctx(), ...extra }),
+      attributes: attrs({ 'event.name': name, 'log.record.uid': hex(16), ...ctx(), ...extra }),
       ...(trace
         ? { traceId: Buffer.from(trace.traceId, 'hex'), spanId: Buffer.from(trace.spanId, 'hex'), flags: 1 }
         : {}),
@@ -91,29 +95,30 @@ export function syntheticSession(o: SyntheticOptions): SyntheticSession {
   };
   const showScreen = (code: string, label: string) => {
     screen = code;
-    event('app.screen.view', { 'app.screen.label': label });
+    event('journey.screen.view', { 'journey.screen.label': label });
     t += 1200;
   };
   const startFlow = (name: string, label: string) => {
     flow = { name, id: hex(16) };
-    event('app.flow.start', { 'app.flow.label': label });
+    event('journey.flow.start', { 'journey.flow.label': label });
     const run = { ...flow, label, start: t };
     t += 200;
     return run;
   };
-  const endFlow = (f: { name: string; id: string; label: string; start: number }, outcome: string) => {
-    event('app.flow.end', {
-      'app.flow.name': f.name,
-      'app.flow.label': f.label,
-      'app.flow.instance_id': f.id,
-      'app.outcome': outcome,
-      'app.duration_ms': Math.round(t - f.start),
+  const endFlow = (f: { name: string; id: string; label: string; start: number }, outcome: string, reason?: string) => {
+    event('journey.flow.end', {
+      'journey.flow.name': f.name,
+      'journey.flow.label': f.label,
+      'journey.flow.instance_id': f.id,
+      'journey.outcome': outcome,
+      'journey.outcome_reason': reason,
+      'journey.duration_ms': Math.round(t - f.start),
     });
     flow = null;
     t += 300;
   };
   const instant = (code: string, label: string, extra: Record<string, V> = {}) => {
-    event('app.action', { 'app.action.name': code, 'app.action.label': label, 'app.action.instance_id': hex(16), ...extra });
+    event('journey.action', { 'journey.action.name': code, 'journey.action.label': label, 'journey.action.instance_id': hex(16), ...extra });
     t += 900;
   };
   const track = (
@@ -122,6 +127,7 @@ export function syntheticSession(o: SyntheticOptions): SyntheticSession {
     http: { method: string; route: string; status: number; ms: number },
     outcome: 'success' | 'failure',
     extra: Record<string, V> = {},
+    reason?: string,
   ) => {
     const traceId = hex(16);
     const spanId = hex(8);
@@ -130,7 +136,7 @@ export function syntheticSession(o: SyntheticOptions): SyntheticSession {
     const httpStart = start + 15;
     const httpEnd = httpStart + http.ms;
     const end = httpEnd + 20;
-    const base = { ...ctx(), 'app.action.name': code, 'app.action.label': label, 'app.action.instance_id': actionId };
+    const base = { ...ctx(), 'journey.action.name': code, 'journey.action.label': label, 'journey.action.instance_id': actionId };
     const failed = outcome === 'failure';
     spans.push({
       traceId: Buffer.from(traceId, 'hex'),
@@ -139,7 +145,7 @@ export function syntheticSession(o: SyntheticOptions): SyntheticSession {
       kind: 1,
       startTimeUnixNano: ns(start),
       endTimeUnixNano: ns(end),
-      attributes: attrs({ ...base, ...extra, 'app.outcome': outcome }),
+      attributes: attrs({ ...base, ...extra, 'journey.outcome': outcome, 'journey.outcome_reason': reason }),
       status: failed ? { code: 2, message: 'failure' } : {},
     });
     const httpSpanId = hex(8);
@@ -175,12 +181,13 @@ export function syntheticSession(o: SyntheticOptions): SyntheticSession {
       status: http.status >= 500 ? { code: 2 } : {},
     });
     event(
-      'app.action',
+      'journey.action',
       {
         ...base,
         ...extra,
-        'app.outcome': outcome,
-        'app.duration_ms': Math.round(end - start),
+        'journey.outcome': outcome,
+        'journey.outcome_reason': reason,
+        'journey.duration_ms': Math.round(end - start),
         ...(failed && http.status >= 400 ? { 'error.type': String(http.status) } : {}),
       },
       start,
@@ -189,14 +196,20 @@ export function syntheticSession(o: SyntheticOptions): SyntheticSession {
     t = end + 700;
   };
 
+  event('session.start', { 'session.previous_id': o.previousSessionId });
   showScreen('home', 'Início');
   showScreen('login', 'Login');
   const login = startFlow('login', 'Login');
   instant('chooseSavedLogin', 'Escolheu login salvo');
   instant('chooseBiometric', 'Escolheu biometria', { 'app.login.method': 'biometric' });
-  track('confirmLogin', 'Confirmou o login', { method: 'POST', route: '/v1/sessions', status: 401, ms: 640 }, 'failure', {
-    'app.login.attempt': 1,
-  });
+  track(
+    'confirmLogin',
+    'Confirmou o login',
+    { method: 'POST', route: '/v1/sessions', status: 401, ms: 640 },
+    'failure',
+    { 'app.login.attempt': 1 },
+    'invalidPassword',
+  );
   instant('retry', 'Tentou novamente');
   const loginOk = !o.loginFails;
   track(
@@ -205,8 +218,9 @@ export function syntheticSession(o: SyntheticOptions): SyntheticSession {
     { method: 'POST', route: '/v1/sessions', status: loginOk ? 200 : 401, ms: 410 },
     loginOk ? 'success' : 'failure',
     { 'app.login.attempt': 2 },
+    loginOk ? undefined : 'blockedAccount',
   );
-  endFlow(login, loginOk ? 'success' : 'failure');
+  endFlow(login, loginOk ? 'success' : 'failure', loginOk ? undefined : 'blockedAccount');
 
   if (loginOk) {
     user = o.userId;
@@ -220,8 +234,10 @@ export function syntheticSession(o: SyntheticOptions): SyntheticSession {
       'Pagou',
       { method: 'POST', route: '/v1/payments', status: payOk ? 201 : 502, ms: payOk ? 980 : 3100 },
       payOk ? 'success' : 'failure',
+      {},
+      payOk ? undefined : 'paymentUnavailable',
     );
-    if (!o.checkoutOpen) endFlow(checkout, payOk ? 'success' : 'failure');
+    if (!o.checkoutOpen) endFlow(checkout, payOk ? 'success' : 'failure', payOk ? undefined : 'paymentUnavailable');
   }
 
   return {

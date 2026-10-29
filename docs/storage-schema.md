@@ -1,6 +1,7 @@
 # MongoDB storage schema
 
-Version 1. The dashboard in `query` mode reads exactly this. Any service that
+Version 2 (journey contract version 2). The dashboard in `query` mode reads
+exactly this. Any service that
 writes these three collections in this shape (the bundled receiver, a BFF, a
 collector exporter) works with it. `npm run conformance` checks a receiver
 against this document.
@@ -25,15 +26,17 @@ first, then from its resource.
 | `serviceVersion` | string \| null | resource `service.version` |
 | `environment` | string \| null | resource `deployment.environment.name` |
 | `platform` | string \| null | resource `os.name`, else `os.type` |
-| `deviceId` | string \| null | `device.id`, **or what the receiver authenticated** |
+| `deviceId` | string \| null | **only** what the receiver authenticated (a device header it checks); never the payload. Null otherwise |
+| `installationId` | string \| null | resource `app.installation.id` |
 | `sessionId` | string \| null | `session.id` |
 | `userId` | string \| null | `user.id`, **or what the receiver authenticated** |
 | `screen` | string \| null | `app.screen.name` |
-| `flow` | string \| null | `app.flow.name` |
-| `flowInstanceId` | string \| null | `app.flow.instance_id` |
-| `actionName` | string \| null | `app.action.name` |
-| `actionInstanceId` | string \| null | `app.action.instance_id` |
-| `outcome` | `success` \| `failure` \| `cancelled` \| `completed` \| null | `app.outcome` (other values: null) |
+| `flow` | string \| null | `journey.flow.name` |
+| `flowInstanceId` | string \| null | `journey.flow.instance_id` |
+| `actionName` | string \| null | `journey.action.name` |
+| `actionInstanceId` | string \| null | `journey.action.instance_id` |
+| `outcome` | `success` \| `failure` \| `cancelled` \| `completed` \| null | `journey.outcome` (other values: null) |
+| `outcomeReason` | string \| null | `journey.outcome_reason` |
 | `errorType` | string \| null | `error.type` |
 | `source` | string \| null | `otel_flutter_bridge.source` (`dart` / `native`) |
 | `resource` | `{key, value}[]` | the OTLP resource, as received |
@@ -71,18 +74,18 @@ One document per OTLP log record (journey events).
 
 | Field | Type | Notes |
 |---|---|---|
-| `_id` | string | stable digest of resource, scope and record; identical resends are ignored |
+| `_id` | string | `{service}:{log.record.uid}`; without a uid, a digest of resource, scope and record. Resends are ignored |
 | `time` | Date | `time_unix_nano`, or `observed_time_unix_nano` when zero |
 | `timeNs` | string | |
 | `eventName` | string \| null | OTLP `event_name`, else attribute `event.name` |
 | `severityNumber` | number | |
-| `screenLabel`, `flowLabel`, `actionLabel` | string \| null | `app.*.label` |
-| `durationMs` | number \| null | `app.duration_ms` |
+| `screenLabel`, `flowLabel`, `actionLabel` | string \| null | `journey.*.label` |
+| `durationMs` | number \| null | `journey.duration_ms` |
 | `traceId`, `spanId` | string \| null | null when the event happened outside a span |
 | `attributes` | `{key, value}[]` | |
 
 Indexes: `{sessionId: 1, time: 1}`, `{deviceId: 1, time: -1}`,
-`{userId: 1, time: -1}`, `{traceId: 1}`, `{outcome: 1, time: -1}`, TTL
+`{installationId: 1, time: -1}`, `{userId: 1, time: -1}`, `{traceId: 1}`, `{outcome: 1, time: -1}`, TTL
 `{expireAt: 1}`.
 
 ## `sessions`
@@ -95,6 +98,8 @@ count twice).
 |---|---|---|
 | `_id` | string | `session.id` |
 | `deviceId` | string \| null | last non-null `deviceId` seen |
+| `installationId` | string \| null | last non-null `installationId` seen |
+| `previousSessionId` | string \| null | `session.previous_id` of the session's `session.start` event, when it differs from `_id` |
 | `userIds` | string[] | `$addToSet` of non-null `userId` |
 | `services`, `versions`, `platforms`, `environments` | string[] | `$addToSet` |
 | `firstSeen` | Date | `$min` of event `time` / span `start` |
@@ -105,7 +110,7 @@ count twice).
 | `expireAt` | Date | `$max` of the records' `expireAt`; TTL |
 
 Indexes: `{lastSeen: -1}`, `{deviceId: 1, lastSeen: -1}`,
-`{userIds: 1, lastSeen: -1}`, TTL `{expireAt: 1}`.
+`{installationId: 1, lastSeen: -1}`, `{userIds: 1, lastSeen: -1}`, TTL `{expireAt: 1}`.
 
 Spans and events without `sessionId` (for example backend spans of the same
 trace) are stored and shown in traces, but do not touch `sessions`.
@@ -114,3 +119,14 @@ trace) are stored and shown in traces, but do not touch `sessions`.
 
 TTL deletion runs about once a minute, so every query also filters
 `expireAt > now`.
+
+## Changes from version 1
+
+- Attribute keys follow journey contract version 2: `journey.*` instead of
+  `app.flow.*`, `app.action.*`, `app.outcome`, `app.duration_ms` and
+  `app.*.label`. `app.screen.name` is unchanged.
+- `deviceId` comes only from the receiver; the payload's `device.id` is
+  ignored.
+- New fields: `installationId`, `outcomeReason`, and on `sessions`
+  `installationId` and `previousSessionId`.
+- `events._id` is built from `log.record.uid`.

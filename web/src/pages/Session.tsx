@@ -23,6 +23,7 @@ export function SessionPage() {
 }
 
 const KIND_TEXT: Record<JourneyStep['kind'], string> = {
+  session: 'Início de sessão',
   screen: 'Entrada em tela',
   action: 'Ação',
   flowStart: 'Início de fluxo',
@@ -56,13 +57,34 @@ function SessionView({ data }: { data: JourneyResponse }) {
           </h1>
           <p className="lede">
             {fmtDateTime(session.firstSeen)}, durou {fmtDuration(Date.parse(session.lastSeen) - Date.parse(session.firstSeen))}
+            {session.previousSessionId && (
+              <>
+                , continua a <Link to={`/sessions/${session.previousSessionId}`}>sessão {shortId(session.previousSessionId)}</Link>
+              </>
+            )}
           </p>
         </div>
         <dl className="facts">
           <div>
             <dt>Aparelho</dt>
             <dd className="mono">
-              {session.deviceId ? <Link to={`/?deviceId=${encodeURIComponent(session.deviceId)}&period=30d`}>{session.deviceId}</Link> : 'sem device.id'}
+              {session.deviceId ? (
+                <Link to={`/?deviceId=${encodeURIComponent(session.deviceId)}&period=30d`}>{session.deviceId}</Link>
+              ) : (
+                <span className="muted" title="device.id só vem do servidor, a partir do que ele autenticou">
+                  não informado
+                </span>
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt>Instalação</dt>
+            <dd className="mono">
+              {session.installationId ? (
+                <Link to={`/?installationId=${encodeURIComponent(session.installationId)}&period=30d`}>{session.installationId}</Link>
+              ) : (
+                <span className="muted">não informada</span>
+              )}
             </dd>
           </div>
           <div>
@@ -137,6 +159,7 @@ function FlowStrip({ flows, codes, steps, onSelect }: { flows: FlowRun[]; codes:
               <span className="flow-name">{f.label ?? humanize(f.code)}</span>
               {f.attempt > 1 && <span className="attempt">execução {f.attempt}</span>}
               <span className={`pill ${f.status}`}>{outcomeText[f.status]}</span>
+              {f.reason && <span className="reason mono">{f.reason}</span>}
               {f.durationMs !== null && <span className="dur">{fmtDuration(f.durationMs)}</span>}
               {f.failures > 0 && f.status !== 'failure' && (
                 <span className="muted">{f.failures === 1 ? '1 falha no caminho' : `${f.failures} falhas no caminho`}</span>
@@ -173,8 +196,26 @@ function StepDetail({ step, run, start, lineColor: color }: { step: JourneyStep;
               , erro <code>{step.errorType}</code>
             </span>
           )}
+          {step.outcomeReason && (
+            <span>
+              , motivo <code>{step.outcomeReason}</code>
+            </span>
+          )}
           <p>{outcomeHelp[status]}</p>
         </div>
+      )}
+
+      {step.kind === 'session' && (
+        <p className="hint">
+          {step.previousSessionId ? (
+            <>
+              A sessão anterior expirou com o app aberto; esta continua a{' '}
+              <Link to={`/sessions/${step.previousSessionId}`}>sessão {shortId(step.previousSessionId)}</Link>.
+            </>
+          ) : (
+            'Primeira sessão desde que o app abriu, ou depois de um logout.'
+          )}
+        </p>
       )}
 
       <dl className="kv context">
@@ -238,7 +279,9 @@ function StepDetail({ step, run, start, lineColor: color }: { step: JourneyStep;
           <p className="hint">
             {step.kind === 'action'
               ? 'Ação pontual: não tem duração nem trace.'
-              : 'Este acontecimento não estava dentro de uma operação medida, então não há árvore de spans.'}
+              : step.kind === 'session'
+                ? 'O início de uma sessão não tem árvore de spans.'
+                : 'Este acontecimento não estava dentro de uma operação medida, então não há árvore de spans.'}
           </p>
         )}
         {step.traceId && trace.status === 'loading' && <p className="hint">Carregando spans…</p>}

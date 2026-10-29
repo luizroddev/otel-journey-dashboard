@@ -7,7 +7,7 @@ import { encode, syntheticSession } from '../scripts/lib/synthetic.js';
 
 const opts = { now: new Date('2026-10-28T12:00:00Z'), retentionDays: 30 };
 const session = () =>
-  syntheticSession({ start: Date.parse('2026-10-28T11:00:00Z'), deviceId: 'demo-device-1', userId: 'demo-user-1' });
+  syntheticSession({ start: Date.parse('2026-10-28T11:00:00Z'), installationId: 'demo-install-1', userId: 'demo-user-1' });
 
 describe('decode and map', () => {
   it('protobuf spans keep ids, nanos, hierarchy and context', () => {
@@ -20,7 +20,10 @@ describe('decode and map', () => {
     expect(action.parentSpanId).toBeNull();
     expect(action.statusCode).toBe(2);
     expect(action.sessionId).toBe(s.sessionId);
-    expect(action.deviceId).toBe('demo-device-1');
+    // device.id never comes from the payload; the installation does.
+    expect(action.deviceId).toBeNull();
+    expect(action.installationId).toBe('demo-install-1');
+    expect(action.outcomeReason).toBe('invalidPassword');
     expect(action.service).toBe('demo-shop');
     expect(action.platform).toBe('ios');
     expect(action.flow).toBe('login');
@@ -35,10 +38,16 @@ describe('decode and map', () => {
     const s = session();
     const events = mapLogs(decodeLogs(encode('logs', s.logs), 'protobuf'), opts);
     expect(events).toHaveLength(s.counts.events);
-    expect(events[0]!.eventName).toBe('app.screen.view');
-    expect(events[0]!.screen).toBe('home');
-    expect(events[0]!.screenLabel).toBe('Início');
-    expect(events[0]!.traceId).toBeNull();
+    expect(events[0]!.eventName).toBe('session.start');
+    expect(events[1]!.eventName).toBe('journey.screen.view');
+    expect(events[1]!.screen).toBe('home');
+    expect(events[1]!.screenLabel).toBe('Início');
+    expect(events[1]!.traceId).toBeNull();
+    // The id comes from log.record.uid, so resends map to the same document.
+    for (const e of events) {
+      const uid = e.attributes.find((a) => a.key === 'log.record.uid')!.value;
+      expect(e._id).toBe(`demo-shop:${uid}`);
+    }
     const measured = events.find((e) => e.actionName === 'pay')!;
     expect(measured.traceId).toMatch(/^[0-9a-f]{32}$/);
     expect(measured.durationMs).toBeGreaterThan(900);
@@ -59,12 +68,12 @@ describe('decode and map', () => {
               logRecords: [
                 {
                   timeUnixNano: '1761649200000000000',
-                  eventName: 'app.screen.view',
+                  eventName: 'journey.screen.view',
                   traceId: '5B8EFFF798038103D269B633813FC60C',
                   spanId: 'EEE19B7EC3C1B174',
                   attributes: [
                     { key: 'session.id', value: { stringValue: 's1' } },
-                    { key: 'app.duration_ms', value: { intValue: '12' } },
+                    { key: 'journey.duration_ms', value: { intValue: '12' } },
                   ],
                 },
               ],
@@ -74,15 +83,19 @@ describe('decode and map', () => {
       ],
     };
     const [e] = mapLogs(decodeLogs(JSON.stringify(json), 'json'), opts);
-    expect(e!.eventName).toBe('app.screen.view');
+    expect(e!.eventName).toBe('journey.screen.view');
+    // No log.record.uid: a digest of the record is the id.
+    expect(e!._id).toMatch(/^[0-9a-f]{40}$/);
     expect(e!.traceId).toBe('5b8efff798038103d269b633813fc60c');
     expect(e!.spanId).toBe('eee19b7ec3c1b174');
     expect(e!.durationMs).toBe(12);
     expect(e!.time.toISOString()).toBe('2025-10-28T11:00:00.000Z');
   });
 
-  it('identity from the receiver overrides the payload', () => {
+  it('the receiver is the only source of deviceId and can override the user', () => {
     const s = session();
+    const plain = mapLogs(decodeLogs(encode('logs', s.logs), 'protobuf'), opts);
+    expect(plain.every((e) => e.deviceId === null)).toBe(true);
     const events = mapLogs(decodeLogs(encode('logs', s.logs), 'protobuf'), {
       ...opts,
       identity: { deviceId: 'validated-device', userId: null },
@@ -94,7 +107,7 @@ describe('decode and map', () => {
 
 describe('journey', () => {
   const build = (o: Partial<Parameters<typeof syntheticSession>[0]> = {}) => {
-    const s = syntheticSession({ start: Date.parse('2026-10-28T11:00:00Z'), deviceId: 'd', userId: 'u', ...o });
+    const s = syntheticSession({ start: Date.parse('2026-10-28T11:00:00Z'), installationId: 'i', userId: 'u', ...o });
     const events = mapLogs(decodeLogs(encode('logs', s.logs), 'protobuf'), opts);
     const spans = mapSpans(decodeTraces(encode('traces', s.traces), 'protobuf'), opts);
     return { view: buildJourney([...events].reverse(), spans.filter((x) => !x.parentSpanId)), spans };
@@ -102,9 +115,11 @@ describe('journey', () => {
 
   it('orders steps and separates login attempts', () => {
     const { view } = build();
-    expect(view.steps.map((s) => s.kind).slice(0, 4)).toEqual(['screen', 'screen', 'flowStart', 'action']);
+    expect(view.steps.map((s) => s.kind).slice(0, 5)).toEqual(['session', 'screen', 'screen', 'flowStart', 'action']);
+    expect(view.steps[0]!.previousSessionId).toBeNull();
     const attempts = view.steps.filter((s) => s.code === 'confirmLogin');
     expect(attempts.map((a) => a.outcome)).toEqual(['failure', 'success']);
+    expect(attempts.map((a) => a.outcomeReason)).toEqual(['invalidPassword', null]);
     expect(attempts.every((a) => a.measured && a.traceId)).toBe(true);
     expect(new Set(attempts.map((a) => a.actionInstanceId)).size).toBe(2);
     const method = view.steps.find((s) => s.code === 'chooseBiometric')!.extra;
@@ -115,6 +130,15 @@ describe('journey', () => {
     ]);
     expect(view.flows[0]!.failures).toBe(1);
     expect(view.otherTraces).toEqual([]);
+  });
+
+  it('a failed flow keeps its reason; a session step links the previous one', () => {
+    const { view } = build({ loginFails: true, previousSessionId: 'a'.repeat(32) });
+    const login = view.flows.find((f) => f.code === 'login')!;
+    expect([login.status, login.reason]).toEqual(['failure', 'blockedAccount']);
+    expect(view.steps[0]!.previousSessionId).toBe('a'.repeat(32));
+    // The session start is not a step of any flow.
+    expect(login.steps).toBe(5);
   });
 
   it('a flow without an end is open, never abandoned', () => {

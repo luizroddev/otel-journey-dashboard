@@ -44,6 +44,7 @@ export function apiRoutes(store: Store, config: Config) {
     const items = await listSessions(store, {
       ...w,
       deviceId: q.deviceId || undefined,
+      installationId: q.installationId || undefined,
       userId: q.userId || undefined,
       sessionId: q.sessionId || undefined,
       service: q.service || undefined,

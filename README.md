@@ -38,13 +38,14 @@ npm run build && npm start        # or: npm run dev (Vite on :5173 + API)
 
 ## What you see
 
-- **Sessions**: filter by period, device, user, session, app, version,
-  platform, or only sessions with failures.
+- **Sessions**: filter by period, device, installation, user, session, app,
+  version, platform, or only sessions with failures. A session that
+  continues an expired one links back to it.
 - **Journey**: the session as a line. Screens are stations, actions are
   stops, each flow run is a colored stretch with its result. Failed steps
   are red; a flow that started and never ended shows "no conclusion", not
   "abandoned".
-- **Step detail**: result and duration, screen, flow and attempt, user,
+- **Step detail**: result, reason and duration, screen, flow and attempt, user,
   origin (Flutter or native), the app's own attributes, and the waterfall of
   the step's trace (app spans, HTTP, backend spans) with every attribute.
 - **Trace**: any trace by id, with missing parents and truncation flagged.
@@ -66,7 +67,7 @@ and writes MongoDB): [docs/backend-integration.md](docs/backend-integration.md).
 |---|---|
 | [docs/storage-schema.md](docs/storage-schema.md) | MongoDB collections, fields and indexes. Whatever writes this can be read by `query` mode |
 | [docs/query-api.md](docs/query-api.md) | The JSON API the UI reads |
-| `npm run conformance` | Sends a fictional session to a receiver and checks what it stored (26 checks) |
+| `npm run conformance` | Sends a fictional session to a receiver and checks what it stored (31 checks) |
 
 ## Configuration
 
@@ -85,7 +86,7 @@ and writes MongoDB): [docs/backend-integration.md](docs/backend-integration.md).
 | `MAX_JOURNEY_EVENTS` / `MAX_TRACE_SPANS` | `5000` / `2000` | per view; the UI says when it hit them |
 | `INGEST_TOKEN` | | require `Authorization: Bearer` on ingestion |
 | `API_TOKEN` | | require it on `/api` (UI: `localStorage.apiToken`) |
-| `TRUSTED_DEVICE_HEADER` / `TRUSTED_USER_HEADER` | | headers from a trusted proxy that replace `device.id` / `user.id` |
+| `TRUSTED_DEVICE_HEADER` / `TRUSTED_USER_HEADER` | | headers from a trusted proxy: the device header is the only source of `deviceId`; the user header replaces `user.id` |
 
 The defaults are examples for local use, not a production policy.
 

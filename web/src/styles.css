@@ -392,8 +392,8 @@ table.sessions {
 }
 .facts {
   display: grid;
-  grid-template-columns: repeat(4, auto);
-  gap: 0.25rem 2rem;
+  grid-template-columns: repeat(5, auto);
+  gap: 0.25rem 1.75rem;
   margin: 0;
   align-self: end;
 }
@@ -613,6 +613,28 @@ table.sessions {
 .error-type {
   font-size: var(--t-xs);
   color: var(--failure);
+}
+.reason {
+  font-size: var(--t-xs);
+  color: var(--ink);
+}
+.id-kind {
+  font-family: var(--sans);
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+.kind-session .node {
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-left: -0.35rem;
+  top: 0.68rem;
+  border-radius: 1px;
+  transform: rotate(45deg);
+  background: var(--muted);
+  border-color: var(--muted);
+}
+.kind-session .stop-title {
+  color: var(--muted);
 }
 .flow-head {
   flex-direction: row;

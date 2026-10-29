@@ -23,7 +23,10 @@ export interface CommonFields {
   serviceVersion: string | null;
   environment: string | null;
   platform: string | null;
+  /** `device.id` stamped by the receiver from what it authenticated; never read from the payload. */
   deviceId: string | null;
+  /** `app.installation.id` from the resource: one installation of the app. */
+  installationId: string | null;
   sessionId: string | null;
   userId: string | null;
   screen: string | null;
@@ -32,6 +35,8 @@ export interface CommonFields {
   actionName: string | null;
   actionInstanceId: string | null;
   outcome: Outcome | null;
+  /** `journey.outcome_reason`: why it ended that way, a fixed code from the app. */
+  outcomeReason: string | null;
   errorType: string | null;
   source: string | null;
   resource: Attr[];
@@ -65,7 +70,10 @@ export interface SpanDoc extends CommonFields {
   links: { traceId: string; spanId: string }[];
 }
 
-/** Collection `events` (OTLP log records). `_id` = stable digest. */
+/**
+ * Collection `events` (OTLP log records). `_id` = `{service}:{log.record.uid}`,
+ * or a digest of the record when it has no uid.
+ */
 export interface EventDoc extends CommonFields {
   _id: string;
   time: Date;
@@ -85,6 +93,9 @@ export interface EventDoc extends CommonFields {
 export interface SessionDoc {
   _id: string;
   deviceId: string | null;
+  installationId: string | null;
+  /** `session.previous_id` of its `session.start`: the session this one follows. */
+  previousSessionId: string | null;
   userIds: string[];
   services: string[];
   versions: string[];
@@ -98,34 +109,39 @@ export interface SessionDoc {
   expireAt: Date;
 }
 
-/** Attribute keys of the journey contract (otel_flutter_bridge docs/specs/journey.md). */
+/** Attribute keys of the journey contract, version 2 (otel_flutter_bridge docs/specs/journey.md). */
 export const Keys = {
   serviceName: 'service.name',
   serviceVersion: 'service.version',
   environment: 'deployment.environment.name',
   osName: 'os.name',
   osType: 'os.type',
-  deviceId: 'device.id',
+  installationId: 'app.installation.id',
   sessionId: 'session.id',
+  sessionPreviousId: 'session.previous_id',
   userId: 'user.id',
   eventName: 'event.name',
+  logRecordUid: 'log.record.uid',
   screen: 'app.screen.name',
-  screenLabel: 'app.screen.label',
-  flow: 'app.flow.name',
-  flowLabel: 'app.flow.label',
-  flowInstanceId: 'app.flow.instance_id',
-  action: 'app.action.name',
-  actionLabel: 'app.action.label',
-  actionInstanceId: 'app.action.instance_id',
-  outcome: 'app.outcome',
-  durationMs: 'app.duration_ms',
+  screenLabel: 'journey.screen.label',
+  flow: 'journey.flow.name',
+  flowLabel: 'journey.flow.label',
+  flowInstanceId: 'journey.flow.instance_id',
+  flowParentInstanceId: 'journey.flow.parent_instance_id',
+  action: 'journey.action.name',
+  actionLabel: 'journey.action.label',
+  actionInstanceId: 'journey.action.instance_id',
+  outcome: 'journey.outcome',
+  outcomeReason: 'journey.outcome_reason',
+  durationMs: 'journey.duration_ms',
   errorType: 'error.type',
   source: 'otel_flutter_bridge.source',
 } as const;
 
 export const EventNames = {
-  screenView: 'app.screen.view',
-  action: 'app.action',
-  flowStart: 'app.flow.start',
-  flowEnd: 'app.flow.end',
+  sessionStart: 'session.start',
+  screenView: 'journey.screen.view',
+  action: 'journey.action',
+  flowStart: 'journey.flow.start',
+  flowEnd: 'journey.flow.end',
 } as const;

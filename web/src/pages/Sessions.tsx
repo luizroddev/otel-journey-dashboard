@@ -13,6 +13,7 @@ const PERIODS = [
 
 const TEXT_FILTERS = [
   { key: 'deviceId', label: 'Aparelho', placeholder: 'device.id' },
+  { key: 'installationId', label: 'Instalação', placeholder: 'app.installation.id' },
   { key: 'userId', label: 'Usuário', placeholder: 'user.id' },
   { key: 'sessionId', label: 'Sessão', placeholder: 'session.id' },
 ] as const;
@@ -30,6 +31,7 @@ export function SessionsPage() {
 
   const filters = {
     deviceId: params.get('deviceId') ?? '',
+    installationId: params.get('installationId') ?? '',
     userId: params.get('userId') ?? '',
     sessionId: params.get('sessionId') ?? '',
     service: params.get('service') ?? '',
@@ -195,7 +197,16 @@ function SessionTable({ items }: { items: SessionSummary[] }) {
                 </Link>
               </td>
               <td className="num-left">{fmtDuration(Date.parse(s.lastSeen) - Date.parse(s.firstSeen))}</td>
-              <td className="mono">{s.deviceId ?? <span className="muted">sem device.id</span>}</td>
+              <td className="mono">
+                {s.deviceId ??
+                  (s.installationId ? (
+                    <>
+                      {s.installationId} <span className="id-kind">instalação</span>
+                    </>
+                  ) : (
+                    <span className="muted">não informado</span>
+                  ))}
+              </td>
               <td className="mono">{s.userIds.length ? s.userIds.join(', ') : <span className="muted">não autenticou</span>}</td>
               <td>
                 {s.platforms.map(platformName).join(', ')} {s.versions.join(', ')}
