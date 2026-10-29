@@ -11,7 +11,15 @@ export interface Config {
   /** Dashboard and query API port. */
   httpPort: number;
   host: string;
+  /** TTL of `spans`, `events` and `sessions`. */
   retentionDays: number;
+  /** Whether this instance derives `sessions` and `rollups` (modes `all` and `query`). */
+  aggregator: boolean;
+  aggregateEveryMs: number;
+  /** Records received in the last N ms wait for the next run (slow inserts, writer clocks). */
+  aggregateLagMs: number;
+  /** TTL of `rollups`: the overview can look this far back. */
+  rollupRetentionDays: number;
   maxBodyBytes: number;
   maxRecordsPerRequest: number;
   /** When set, `/api` requires `Authorization: Bearer <token>`. */
@@ -50,6 +58,10 @@ export function loadConfig(): Config {
     httpPort: int('PORT', 8686),
     host: process.env.HOST ?? '0.0.0.0',
     retentionDays: int('RETENTION_DAYS', 30),
+    aggregator: (process.env.AGGREGATOR ?? 'on').toLowerCase() !== 'off',
+    aggregateEveryMs: int('AGGREGATE_EVERY_SECONDS', 15) * 1000,
+    aggregateLagMs: int('AGGREGATE_LAG_SECONDS', 30) * 1000,
+    rollupRetentionDays: int('ROLLUP_RETENTION_DAYS', 400),
     maxBodyBytes: int('MAX_BODY_BYTES', 1024 * 1024),
     maxRecordsPerRequest: int('MAX_RECORDS_PER_REQUEST', 1000),
     apiToken: process.env.API_TOKEN || null,

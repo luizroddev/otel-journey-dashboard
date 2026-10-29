@@ -1,14 +1,16 @@
-// MongoDB storage: collections `spans`, `events` and `sessions`, their
-// indexes, writes from ingestion and reads for the query API.
+// MongoDB storage: the collections, their indexes, inserts from ingestion
+// and reads for the query API. Writers only insert `spans` and `events`;
+// `sessions` and `rollups` are derived by the aggregator (aggregate.ts).
 import { MongoClient, type Collection, type Db, type Filter, type AnyBulkWriteOperation } from 'mongodb';
-import type { EventDoc, SessionDoc, SpanDoc } from '../model.js';
-import { EventNames, Keys } from '../model.js';
+import type { EventDoc, JobDoc, RollupDoc, SessionDoc, SpanDoc } from '../model.js';
 
 export interface Store {
   db: Db;
   spans: Collection<SpanDoc>;
   events: Collection<EventDoc>;
   sessions: Collection<SessionDoc>;
+  rollups: Collection<RollupDoc>;
+  jobs: Collection<JobDoc>;
   close(): Promise<void>;
 }
 
@@ -21,41 +23,58 @@ export async function connect(url: string, dbName: string): Promise<Store> {
     spans: db.collection<SpanDoc>('spans'),
     events: db.collection<EventDoc>('events'),
     sessions: db.collection<SessionDoc>('sessions'),
+    rollups: db.collection<RollupDoc>('rollups'),
+    jobs: db.collection<JobDoc>('jobs'),
     close: () => client.close(),
   };
 }
 
-/** Creates the indexes of docs/storage-schema.md. Idempotent. */
-export async function ensureIndexes(s: Store): Promise<void> {
-  await Promise.all([
-    s.spans.createIndexes([
-      { key: { traceId: 1, start: 1 } },
-      { key: { sessionId: 1, start: 1 } },
-      { key: { statusCode: 1, start: -1 } },
-      { key: { expireAt: 1 }, expireAfterSeconds: 0 },
-    ]),
-    s.events.createIndexes([
-      { key: { sessionId: 1, time: 1 } },
-      { key: { deviceId: 1, time: -1 } },
-      { key: { installationId: 1, time: -1 } },
-      { key: { userId: 1, time: -1 } },
-      { key: { traceId: 1 } },
-      { key: { outcome: 1, time: -1 } },
-      { key: { expireAt: 1 }, expireAfterSeconds: 0 },
-    ]),
-    s.sessions.createIndexes([
-      { key: { lastSeen: -1 } },
-      { key: { deviceId: 1, lastSeen: -1 } },
-      { key: { installationId: 1, lastSeen: -1 } },
-      { key: { userIds: 1, lastSeen: -1 } },
-      { key: { expireAt: 1 }, expireAfterSeconds: 0 },
-    ]),
-  ]);
+/**
+ * Creates the indexes of docs/storage-schema.md. Idempotent. `raw`: the
+ * collections writers fill (`spans`, `events`); `derived`: the ones the
+ * aggregator fills.
+ */
+export async function ensureIndexes(s: Store, which: { raw: boolean; derived: boolean }): Promise<void> {
+  const all: Promise<unknown>[] = [];
+  if (which.raw) {
+    all.push(
+      s.spans.createIndexes([
+        { key: { traceId: 1, start: 1 } },
+        { key: { sessionId: 1, start: 1 } },
+        { key: { receivedAt: 1 } },
+        { key: { expireAt: 1 }, expireAfterSeconds: 0 },
+      ]),
+      s.events.createIndexes([
+        { key: { sessionId: 1, time: 1 } },
+        { key: { traceId: 1 } },
+        { key: { receivedAt: 1 } },
+        { key: { expireAt: 1 }, expireAfterSeconds: 0 },
+      ]),
+    );
+  }
+  if (which.derived) {
+    all.push(
+      s.sessions.createIndexes([
+        { key: { lastSeen: -1 } },
+        { key: { deviceId: 1, lastSeen: -1 } },
+        { key: { installationId: 1, lastSeen: -1 } },
+        { key: { userIds: 1, lastSeen: -1 } },
+        { key: { 'failures.code': 1, lastSeen: -1 } },
+        { key: { flows: 1, lastSeen: -1 } },
+        { key: { expireAt: 1 }, expireAfterSeconds: 0 },
+      ]),
+      s.rollups.createIndexes([
+        { key: { kind: 1, hour: 1 } },
+        { key: { expireAt: 1 }, expireAfterSeconds: 0 },
+      ]),
+    );
+  }
+  await Promise.all(all);
 }
 
-/** Inserts documents whose `_id` is new; resends are ignored. Returns the inserted ones. */
-async function insertNew<T extends { _id: string }>(col: Collection<T>, docs: T[]): Promise<T[]> {
-  if (docs.length === 0) return [];
+/** Inserts documents whose `_id` is new; resends are ignored. Returns how many were new. */
+async function insertNew<T extends { _id: string }>(col: Collection<T>, docs: T[]): Promise<number> {
+  if (docs.length === 0) return 0;
   const ops = docs.map(
     (d) =>
       ({
@@ -63,126 +82,11 @@ async function insertNew<T extends { _id: string }>(col: Collection<T>, docs: T[
       }) as unknown as AnyBulkWriteOperation<T>,
   );
   const r = await col.bulkWrite(ops, { ordered: false });
-  return Object.keys(r.upsertedIds).map((i) => docs[Number(i)]!);
+  return r.upsertedCount;
 }
 
-export async function writeSpans(s: Store, docs: SpanDoc[]): Promise<number> {
-  const inserted = await insertNew(s.spans, docs);
-  await updateSessions(s, inserted.map((d) => ({
-    sessionId: d.sessionId,
-    deviceId: d.deviceId,
-    installationId: d.installationId,
-    previousSessionId: null,
-    userId: d.userId,
-    service: d.service,
-    version: d.serviceVersion,
-    platform: d.platform,
-    environment: d.environment,
-    time: d.start,
-    end: d.end,
-    spans: 1,
-    events: 0,
-    // One error per failed operation: action spans count through their
-    // event, child spans through their root.
-    errors: d.statusCode === 2 && !d.actionInstanceId && !d.parentSpanId ? 1 : 0,
-    expireAt: d.expireAt,
-  })));
-  return inserted.length;
-}
-
-export async function writeEvents(s: Store, docs: EventDoc[]): Promise<number> {
-  const inserted = await insertNew(s.events, docs);
-  await updateSessions(s, inserted.map((d) => ({
-    sessionId: d.sessionId,
-    deviceId: d.deviceId,
-    installationId: d.installationId,
-    previousSessionId: d.eventName === EventNames.sessionStart ? previousId(d) : null,
-    userId: d.userId,
-    service: d.service,
-    version: d.serviceVersion,
-    platform: d.platform,
-    environment: d.environment,
-    time: d.time,
-    end: d.time,
-    spans: 0,
-    events: 1,
-    errors: d.outcome === 'failure' ? 1 : 0,
-    expireAt: d.expireAt,
-  })));
-  return inserted.length;
-}
-
-function previousId(d: EventDoc): string | null {
-  const v = d.attributes.find((a) => a.key === Keys.sessionPreviousId)?.value;
-  return typeof v === 'string' && v && v !== d.sessionId ? v : null;
-}
-
-interface SessionTouch {
-  sessionId: string | null;
-  deviceId: string | null;
-  installationId: string | null;
-  previousSessionId: string | null;
-  userId: string | null;
-  service: string | null;
-  version: string | null;
-  platform: string | null;
-  environment: string | null;
-  time: Date;
-  end: Date;
-  spans: number;
-  events: number;
-  errors: number;
-  expireAt: Date;
-}
-
-async function updateSessions(s: Store, touches: SessionTouch[]): Promise<void> {
-  const by = new Map<string, SessionTouch[]>();
-  for (const t of touches) {
-    if (!t.sessionId) continue;
-    by.set(t.sessionId, [...(by.get(t.sessionId) ?? []), t]);
-  }
-  if (by.size === 0) return;
-  const ops: AnyBulkWriteOperation<SessionDoc>[] = [];
-  for (const [id, list] of by) {
-    const values = (f: (t: SessionTouch) => string | null) =>
-      [...new Set(list.map(f).filter((v): v is string => !!v))];
-    const first = new Date(Math.min(...list.map((t) => t.time.getTime())));
-    const last = new Date(Math.max(...list.map((t) => t.end.getTime())));
-    // Identity fields take a value when the batch has one; null until then.
-    const set: Record<string, string> = {};
-    const onInsert: Record<string, null> = {};
-    for (const field of ['deviceId', 'installationId', 'previousSessionId'] as const) {
-      const v = list.find((t) => t[field])?.[field];
-      if (v) set[field] = v;
-      else onInsert[field] = null;
-    }
-    ops.push({
-      updateOne: {
-        filter: { _id: id },
-        update: {
-          $min: { firstSeen: first },
-          $max: { lastSeen: last, expireAt: new Date(Math.max(...list.map((t) => t.expireAt.getTime()))) },
-          $inc: {
-            spanCount: list.reduce((n, t) => n + t.spans, 0),
-            eventCount: list.reduce((n, t) => n + t.events, 0),
-            errorCount: list.reduce((n, t) => n + t.errors, 0),
-          },
-          $addToSet: {
-            userIds: { $each: values((t) => t.userId) },
-            services: { $each: values((t) => t.service) },
-            versions: { $each: values((t) => t.version) },
-            platforms: { $each: values((t) => t.platform) },
-            environments: { $each: values((t) => t.environment) },
-          },
-          ...(Object.keys(set).length ? { $set: set } : {}),
-          ...(Object.keys(onInsert).length ? { $setOnInsert: onInsert } : {}),
-        },
-        upsert: true,
-      },
-    });
-  }
-  await s.sessions.bulkWrite(ops, { ordered: false });
-}
+export const writeSpans = (s: Store, docs: SpanDoc[]) => insertNew(s.spans, docs);
+export const writeEvents = (s: Store, docs: EventDoc[]) => insertNew(s.events, docs);
 
 export interface SessionQuery {
   from: Date;
@@ -196,6 +100,10 @@ export interface SessionQuery {
   platform?: string;
   environment?: string;
   onlyErrors?: boolean;
+  /** Sessions that started this flow. */
+  flow?: string;
+  /** Sessions where this flow run or action failed, optionally with this reason or error type. */
+  failed?: { kind: 'flow' | 'action'; code: string; reason?: string; errorType?: string };
   limit: number;
   /** Cursor: sessions seen before this instant. */
   before?: Date;
@@ -215,6 +123,11 @@ export async function listSessions(s: Store, q: SessionQuery): Promise<SessionDo
   if (q.platform) f.platforms = q.platform;
   if (q.environment) f.environments = q.environment;
   if (q.onlyErrors) f.errorCount = { $gt: 0 };
+  if (q.flow) f.flows = q.flow;
+  if (q.failed) {
+    const { kind, code, reason, errorType } = q.failed;
+    f.failures = { $elemMatch: { kind, code, ...(reason ? { reason } : {}), ...(errorType ? { errorType } : {}) } };
+  }
   return s.sessions.find(f).sort({ lastSeen: -1 }).limit(q.limit).toArray();
 }
 
@@ -256,13 +169,17 @@ export async function traceEvents(s: Store, traceId: string, limit: number): Pro
     .toArray();
 }
 
+/** Values seen in the window, for filter dropdowns. Reads the hourly rollups. */
 export async function facets(s: Store, from: Date, to: Date) {
-  const f = { lastSeen: { $gte: from, $lte: to } };
-  const [services, versions, platforms, environments] = await Promise.all([
-    s.sessions.distinct('services', f),
-    s.sessions.distinct('versions', f),
-    s.sessions.distinct('platforms', f),
-    s.sessions.distinct('environments', f),
+  const hour = { $gte: new Date(Math.floor(from.getTime() / 3_600_000) * 3_600_000), $lte: to };
+  const values = async (field: 'service' | 'version' | 'platform' | 'environment', extra: Filter<RollupDoc> = {}) =>
+    ((await s.rollups.distinct(field, { hour, ...extra })) as (string | null)[]).filter((v): v is string => !!v).sort();
+  const [services, versions, platforms, environments, flows] = await Promise.all([
+    values('service'),
+    values('version'),
+    values('platform'),
+    values('environment'),
+    s.rollups.distinct('code', { hour, kind: 'flow' }),
   ]);
-  return { services, versions, platforms, environments };
+  return { services, versions, platforms, environments, flows: flows.sort() };
 }

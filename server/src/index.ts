@@ -1,12 +1,14 @@
-// Entry point. MODE=all runs the OTLP receiver and the dashboard; `ingest`
-// only the receiver; `query` only the dashboard and its API, reading a
-// MongoDB that something else (for example a BFF) fills.
+// Entry point. MODE=all runs the OTLP receiver, the aggregator and the
+// dashboard; `ingest` only the receiver; `query` the aggregator and the
+// dashboard, reading spans and events that something else (for example a
+// BFF) inserts.
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
+import { startAggregator } from './aggregate/aggregator.js';
 import { loadConfig } from './config.js';
 import { apiRoutes } from './http/api.js';
 import { ingestRoutes } from './http/ingest.js';
@@ -14,7 +16,9 @@ import { connect, ensureIndexes } from './store/mongo.js';
 
 const config = loadConfig();
 const store = await connect(config.mongoUrl, config.mongoDb);
-if (config.mode !== 'query') await ensureIndexes(store);
+const aggregates = config.mode !== 'ingest' && config.aggregator;
+await ensureIndexes(store, { raw: config.mode !== 'query', derived: aggregates });
+const stopAggregator = aggregates ? startAggregator(store, config) : () => {};
 
 if (config.mode !== 'query') {
   serve({ fetch: ingestRoutes(store, config).fetch, port: config.otlpPort, hostname: config.host });
@@ -42,6 +46,7 @@ if (config.mode !== 'ingest') {
 }
 
 const stop = async () => {
+  stopAggregator();
   await store.close();
   process.exit(0);
 };

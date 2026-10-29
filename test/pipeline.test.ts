@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { mapLogs, mapSpans } from '../server/src/ingest/mapping.js';
 import { decodeLogs, decodeTraces } from '../server/src/otlp/decode.js';
 import { buildJourney } from '../server/src/query/journey.js';
-import { buildTrace } from '../server/src/query/trace.js';
+import { buildTrace, withContext } from '../server/src/query/trace.js';
+import { durationBucket, escapeKey, unescapeKey } from '../server/src/aggregate/aggregator.js';
 import { encode, syntheticSession } from '../scripts/lib/synthetic.js';
 
 const opts = { now: new Date('2026-10-28T12:00:00Z'), retentionDays: 30 };
@@ -44,10 +45,7 @@ describe('decode and map', () => {
     expect(events[1]!.screenLabel).toBe('Início');
     expect(events[1]!.traceId).toBeNull();
     // The id comes from log.record.uid, so resends map to the same document.
-    for (const e of events) {
-      const uid = e.attributes.find((a) => a.key === 'log.record.uid')!.value;
-      expect(e._id).toBe(`demo-shop:${uid}`);
-    }
+    expect(events.map((e) => e._id)).toEqual(s.uids.map((u) => `demo-shop:${u}`));
     const measured = events.find((e) => e.actionName === 'pay')!;
     expect(measured.traceId).toMatch(/^[0-9a-f]{32}$/);
     expect(measured.durationMs).toBeGreaterThan(900);
@@ -56,6 +54,29 @@ describe('decode and map', () => {
     // Same record, same id: identical resends are deduplicated.
     const again = mapLogs(decodeLogs(encode('logs', s.logs), 'protobuf'), opts);
     expect(again.map((e) => e._id)).toEqual(events.map((e) => e._id));
+  });
+
+  it('documents are lean: what became a field is not kept twice', () => {
+    const s = session();
+    const events = mapLogs(decodeLogs(encode('logs', s.logs), 'protobuf'), opts);
+    const spans = mapSpans(decodeTraces(encode('traces', s.traces), 'protobuf'), opts);
+    expect(events.every((e) => !('resource' in e))).toBe(true);
+    const keys = (list: { key: string }[]) => list.map((a) => a.key);
+    expect(keys(events.find((e) => e.actionName === 'chooseBiometric')!.attributes)).toEqual(['app.login.method']);
+    // Not projected: kept.
+    expect(keys(events[0]!.attributes)).toEqual([]);
+    const action = spans.find((x) => x.name === 'confirmLogin')!;
+    expect(keys(action.attributes)).toEqual(['journey.action.label', 'app.login.attempt']);
+    expect(keys(action.resource)).toEqual([]);
+    const http = spans.find((x) => x.parentSpanId === action.spanId)!;
+    expect(keys(http.attributes)).toContain('http.request.method');
+    expect(keys(http.attributes)).not.toContain('session.id');
+    // The trace view puts the projected ones back.
+    const shown = withContext(action);
+    expect(shown.attributes.find((a) => a.key === 'journey.action.name')?.value).toBe('confirmLogin');
+    expect(shown.attributes.find((a) => a.key === 'session.id')?.value).toBe(s.sessionId);
+    expect(shown.resource.find((a) => a.key === 'service.name')?.value).toBe('demo-shop');
+    expect(withContext(shown).attributes).toHaveLength(shown.attributes.length);
   });
 
   it('OTLP JSON (hex ids) decodes to the same documents', () => {
@@ -181,5 +202,21 @@ describe('trusted identity headers', () => {
     expect(headerIdentity(base)(ctx({ 'x-device': 'd' }))).toBeUndefined();
     const cfg = { trustedDeviceHeader: 'x-device', trustedUserHeader: 'x-user' } as never;
     expect(headerIdentity(cfg)(ctx({ 'x-device': 'd1' }))).toEqual({ deviceId: 'd1', userId: null });
+  });
+});
+
+describe('rollup helpers', () => {
+  it('escape codes used as field names and read them back', () => {
+    expect(escapeKey('System.Net.HttpRequestException')).toBe('System%2ENet%2EHttpRequestException');
+    expect(escapeKey('$x%')).toBe('%24x%25');
+    for (const k of ['invalidPassword', 'a.b$c%d', '503']) expect(unescapeKey(escapeKey(k))).toBe(k);
+  });
+
+  it('put durations in histogram buckets', () => {
+    expect(durationBucket(0)).toBe(0);
+    expect(durationBucket(50)).toBe(0);
+    expect(durationBucket(51)).toBe(1);
+    expect(durationBucket(980)).toBe(6);
+    expect(durationBucket(10_000_000)).toBe(19);
   });
 });

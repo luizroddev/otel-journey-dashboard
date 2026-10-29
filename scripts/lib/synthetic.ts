@@ -50,6 +50,8 @@ export interface SyntheticSession {
   traces: Record<string, unknown>;
   logs: Record<string, unknown>;
   counts: { spans: number; events: number };
+  /** `log.record.uid` of each record, in order. */
+  uids: string[];
 }
 
 /** Builds one session as OTLP request objects (protobufjs `fromObject` shape). */
@@ -81,13 +83,16 @@ export function syntheticSession(o: SyntheticOptions): SyntheticSession {
     'journey.flow.instance_id': flow?.id,
     'otel_flutter_bridge.source': 'dart',
   });
+  const uids: string[] = [];
   const event = (name: string, extra: Record<string, V | null | undefined>, at = t, trace?: { traceId: string; spanId: string }) => {
+    const uid = hex(16);
+    uids.push(uid);
     records.push({
       timeUnixNano: ns(at),
       observedTimeUnixNano: ns(at + 5),
       severityNumber: 9,
       severityText: 'INFO',
-      attributes: attrs({ 'event.name': name, 'log.record.uid': hex(16), ...ctx(), ...extra }),
+      attributes: attrs({ 'event.name': name, 'log.record.uid': uid, ...ctx(), ...extra }),
       ...(trace
         ? { traceId: Buffer.from(trace.traceId, 'hex'), spanId: Buffer.from(trace.spanId, 'hex'), flags: 1 }
         : {}),
@@ -249,6 +254,7 @@ export function syntheticSession(o: SyntheticOptions): SyntheticSession {
       resourceLogs: [{ resource, scopeLogs: [{ scope: { name: 'otel_flutter_bridge.journey' }, logRecords: records }] }],
     },
     counts: { spans: spans.length, events: records.length },
+    uids,
   };
 }
 

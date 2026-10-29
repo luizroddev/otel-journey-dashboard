@@ -24,6 +24,8 @@ export interface SessionSummary {
   eventCount: number;
   spanCount: number;
   errorCount: number;
+  flows: string[];
+  failures: { kind: 'flow' | 'action'; code: string; reason: string | null; errorType: string | null }[];
 }
 
 export interface SessionsPage {
@@ -126,6 +128,7 @@ export interface Facets {
   versions: string[];
   platforms: string[];
   environments: string[];
+  flows: string[];
 }
 
 export class ApiError extends Error {

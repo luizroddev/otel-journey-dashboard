@@ -17,17 +17,23 @@ Errors: `{ "error": "<message>" }` with 400 (invalid parameters), 401, 404.
 | `deviceId`, `installationId`, `userId`, `sessionId` | | exact match |
 | `service`, `version`, `platform`, `environment` | | exact match |
 | `onlyErrors` | `false` | `true`: `errorCount > 0` |
+| `flow` | | sessions that started this flow |
+| `failedFlow` / `failedAction` | | sessions where a run of this flow, or this action, failed |
+| `reason`, `errorType` | | with `failedFlow` / `failedAction`: only failures with this `journey.outcome_reason` / `error.type` |
 | `limit` | 50 | at most `MAX_PAGE_SIZE` (200) |
 | `before` | | cursor: the previous page's `nextBefore` |
 
-Sessions whose `lastSeen` falls in the window, newest first.
+Sessions whose `lastSeen` falls in the window, newest first. Sessions are
+derived by the aggregator: what was received in the last minute may not be
+there yet (see `/api/status`).
 
 ```json
 {
   "items": [ { "_id": "…", "deviceId": null, "installationId": "…", "previousSessionId": null,
                "userIds": [], "firstSeen": "…", "lastSeen": "…",
                "eventCount": 15, "spanCount": 6, "errorCount": 1, "services": [], "versions": [],
-               "platforms": [], "environments": [] } ],
+               "platforms": [], "environments": [], "flows": ["login"],
+               "failures": [ { "kind": "action", "code": "confirmLogin", "reason": "invalidPassword", "errorType": "401" } ] } ],
   "nextBefore": "2026-10-28T12:00:00.000Z",
   "period": { "from": "…", "to": "…", "clamped": false }
 }
@@ -71,6 +77,8 @@ The session summary, or 404.
   shows it as "no conclusion", never as abandoned.
 - `flows[].attempt` counts runs of the same flow code in the session.
 - `extra` holds attributes outside the journey contract.
+- In `/api/traces/:traceId`, span `attributes` and `resource` include the
+  keys stored as fields again, as the app sent them.
 - `otherTraces` are root spans of the session whose trace no step points to.
 - `limits` tells the UI when it did not load everything (`MAX_JOURNEY_EVENTS`,
   `MAX_TRACE_SPANS`).
@@ -93,5 +101,14 @@ linked to the trace. 404 when neither spans nor events exist.
 
 ## `GET /api/facets?from&to`
 
-Distinct `services`, `versions`, `platforms` and `environments` of sessions
-in the window, for filter dropdowns.
+Distinct `services`, `versions`, `platforms`, `environments` and flow codes
+(`flows`) seen in the window, for filter dropdowns. Read from `rollups`.
+
+## `GET /api/status`
+
+```json
+{ "aggregatedUpTo": "2026-10-28T12:00:00.000Z" }
+```
+
+Everything received up to `aggregatedUpTo` is in `sessions` and `rollups`;
+null before the aggregator's first run.
