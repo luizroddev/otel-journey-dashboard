@@ -131,6 +131,86 @@ export interface Facets {
   flows: string[];
 }
 
+export interface Rate {
+  n: number;
+  failure: number;
+}
+
+export interface ReasonCount {
+  outcome: Outcome;
+  reason: string | null;
+  errorType: string | null;
+  now: number;
+  before: number;
+}
+
+export interface FlowStat {
+  code: string;
+  label: string | null;
+  started: number;
+  success: number;
+  failure: number;
+  cancelled: number;
+  completed: number;
+  open: number;
+  p95Ms: number | null;
+  before: { started: number; failure: number; open: number; p95Ms: number | null };
+  series: { started: number[]; failure: number[]; ended: number[] };
+  reasons: ReasonCount[];
+  byVersion: { version: string | null; platform: string | null; started: number; failure: number; before: Rate; series: { started: number[]; failure: number[] } }[];
+}
+
+export interface ActionStat {
+  code: string;
+  label: string | null;
+  n: number;
+  failure: number;
+  measured: number;
+  p95Ms: number | null;
+  before: { n: number; failure: number; measured: number; p95Ms: number | null };
+}
+
+export interface VersionStat {
+  version: string | null;
+  platform: string | null;
+  sessions: number;
+  failedSessions: number;
+  before: { sessions: number; failedSessions: number };
+  flows: Record<string, Rate>;
+}
+
+export type Change =
+  | {
+      type: 'failure';
+      direction: 'worse' | 'better';
+      code: string;
+      label: string | null;
+      now: Rate;
+      before: Rate;
+      since: string | null;
+      where: { version: string | null; platform: string | null; share: number } | null;
+      reason: { reason: string | null; errorType: string | null; shareBefore: number; shareNow: number; beforeScope: 'version' | 'flow' } | null;
+      impact: number;
+    }
+  | { type: 'duration'; direction: 'worse' | 'better'; code: string; label: string | null; nowMs: number; beforeMs: number; measured: number; impact: number };
+
+export type PeriodKey = '24h' | '7d' | '30d';
+
+export interface Overview {
+  period: { key: PeriodKey; from: string; to: string };
+  previous: { key: 'previous' | 'week'; from: string; to: string };
+  slot: 'hour' | 'day';
+  slots: string[];
+  updatedAt: string | null;
+  minVolume: number;
+  sessions: { now: number; before: number; series: number[] };
+  failedSessions: { now: number; before: number; series: number[] };
+  flows: FlowStat[];
+  actions: ActionStat[];
+  versions: VersionStat[];
+  changes: Change[];
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -167,4 +247,6 @@ export const api = {
   journey: (id: string) => get<JourneyResponse>(`sessions/${encodeURIComponent(id)}/journey`),
   trace: (id: string) => get<TraceResponse>(`traces/${encodeURIComponent(id)}`),
   facets: (from: string, to: string) => get<Facets>(`facets?${qs({ from, to })}`),
+  overview: (q: Record<string, string | undefined>) => get<Overview>(`overview?${qs(q)}`),
+  status: () => get<{ aggregatedUpTo: string | null }>('status'),
 };

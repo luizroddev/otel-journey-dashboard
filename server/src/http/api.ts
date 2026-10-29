@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { aggregatedUpTo } from '../aggregate/aggregator.js';
 import type { Config } from '../config.js';
 import { buildJourney } from '../query/journey.js';
+import { buildOverview, validTimeZone, type CompareKey, type PeriodKey } from '../query/overview.js';
 import { buildTrace, withContext } from '../query/trace.js';
 import {
   facets,
@@ -76,6 +77,28 @@ export function apiRoutes(store: Store, config: Config) {
       nextBefore: items.length > limit ? page[page.length - 1]!.lastSeen.toISOString() : null,
       period: { from: w.from.toISOString(), to: w.to.toISOString(), clamped: w.clamped },
     });
+  });
+
+  app.get('/overview', async (c) => {
+    const q = c.req.query();
+    const period = (['24h', '7d', '30d'] as const).find((p) => p === q.period) ?? '24h';
+    const compare: CompareKey = q.compare === 'week' && period === '24h' ? 'week' : 'previous';
+    const overview = await buildOverview(
+      store,
+      {
+        period: period as PeriodKey,
+        compare,
+        timeZone: validTimeZone(q.tz),
+        service: q.service || undefined,
+        version: q.version || undefined,
+        platform: q.platform || undefined,
+        environment: q.environment || undefined,
+        now: new Date(),
+        minVolume: config.overviewMinVolume,
+      },
+      await aggregatedUpTo(store),
+    );
+    return c.json(overview);
   });
 
   app.get('/status', async (c) => {

@@ -23,6 +23,7 @@ const config: Config = {
   aggregateEveryMs: 15_000,
   aggregateLagMs: 0,
   rollupRetentionDays: 400,
+  overviewMinVolume: 1,
   maxBodyBytes: 1024 * 1024,
   maxRecordsPerRequest: 1000,
   apiToken: null,
@@ -135,6 +136,15 @@ describe.skipIf(!url)('MongoDB end to end', () => {
     expect(facets.body.services).toContain('demo-shop');
     expect(facets.body.flows).toEqual(['checkout', 'login']);
     expect((await get('status')).body.aggregatedUpTo).not.toBeNull();
+
+    const overview = (await get('overview?period=24h&tz=America/Sao_Paulo')).body;
+    expect(overview.slots).toHaveLength(24);
+    expect(overview.sessions.now).toBe(2);
+    const login = overview.flows.find((f: any) => f.code === 'login');
+    expect([login.label, login.started, login.success]).toEqual(['Login', 2, 2]);
+    expect(overview.actions.find((a: any) => a.code === 'confirmLogin').failure).toBe(2);
+    expect(overview.versions[0]).toMatchObject({ version: '1.4.0', platform: 'ios', sessions: 2 });
+    expect((await get('overview?period=7d')).body.slot).toBe('day');
   });
 
   it('rollups count flows, actions, reasons and sessions per hour', async () => {

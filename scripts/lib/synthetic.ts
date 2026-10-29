@@ -37,12 +37,26 @@ export interface SyntheticOptions {
   previousSessionId?: string;
   platform?: 'ios' | 'android';
   version?: string;
-  /** Whether the login retry also fails (the session never logs in). */
+  /** Whether the first login attempt fails with a wrong password (default true). */
+  wrongPasswordFirst?: boolean;
+  /** Whether the last login attempt also fails (the session never logs in). */
   loginFails?: boolean;
+  /** Reason of that failure (default `blockedAccount`). */
+  loginFailReason?: string;
+  /** Duration of the login request, ms. */
+  loginMs?: number;
+  /** Whether a logged-in session goes to checkout (default true). */
+  checkout?: boolean;
+  /** The user leaves the checkout before paying (`cancelled`). */
+  cancelCheckout?: boolean;
   /** Whether the payment fails. */
   paymentFails?: boolean;
+  /** Duration of the payment request, ms. */
+  paymentMs?: number;
   /** Leave the checkout flow without an end (no conclusion). */
   checkoutOpen?: boolean;
+  /** Run a return flow ending this way. */
+  returns?: 'success' | 'cancelled' | 'failure';
 }
 
 export interface SyntheticSession {
@@ -207,42 +221,59 @@ export function syntheticSession(o: SyntheticOptions): SyntheticSession {
   const login = startFlow('login', 'Login');
   instant('chooseSavedLogin', 'Escolheu login salvo');
   instant('chooseBiometric', 'Escolheu biometria', { 'app.login.method': 'biometric' });
-  track(
-    'confirmLogin',
-    'Confirmou o login',
-    { method: 'POST', route: '/v1/sessions', status: 401, ms: 640 },
-    'failure',
-    { 'app.login.attempt': 1 },
-    'invalidPassword',
-  );
-  instant('retry', 'Tentou novamente');
+  let attempt = 1;
+  if (o.wrongPasswordFirst ?? true) {
+    track(
+      'confirmLogin',
+      'Confirmou o login',
+      { method: 'POST', route: '/v1/sessions', status: 401, ms: o.loginMs ?? 640 },
+      'failure',
+      { 'app.login.attempt': attempt++ },
+      'invalidPassword',
+    );
+    instant('retry', 'Tentou novamente');
+  }
   const loginOk = !o.loginFails;
+  const loginReason = o.loginFailReason ?? 'blockedAccount';
   track(
     'confirmLogin',
     'Confirmou o login',
-    { method: 'POST', route: '/v1/sessions', status: loginOk ? 200 : 401, ms: 410 },
+    { method: 'POST', route: '/v1/sessions', status: loginOk ? 200 : 401, ms: o.loginMs ?? 410 },
     loginOk ? 'success' : 'failure',
-    { 'app.login.attempt': 2 },
-    loginOk ? undefined : 'blockedAccount',
+    { 'app.login.attempt': attempt },
+    loginOk ? undefined : loginReason,
   );
-  endFlow(login, loginOk ? 'success' : 'failure', loginOk ? undefined : 'blockedAccount');
+  endFlow(login, loginOk ? 'success' : 'failure', loginOk ? undefined : loginReason);
 
   if (loginOk) {
     user = o.userId;
-    showScreen('catalog', 'Catálogo');
-    const checkout = startFlow('checkout', 'Compra');
-    instant('addToCart', 'Adicionou ao carrinho', { 'app.cart.items': 2 });
-    showScreen('cart', 'Carrinho');
-    const payOk = !o.paymentFails;
-    track(
-      'pay',
-      'Pagou',
-      { method: 'POST', route: '/v1/payments', status: payOk ? 201 : 502, ms: payOk ? 980 : 3100 },
-      payOk ? 'success' : 'failure',
-      {},
-      payOk ? undefined : 'paymentUnavailable',
-    );
-    if (!o.checkoutOpen) endFlow(checkout, payOk ? 'success' : 'failure', payOk ? undefined : 'paymentUnavailable');
+    if (o.checkout ?? true) {
+      showScreen('catalog', 'Catálogo');
+      const checkout = startFlow('checkout', 'Compra');
+      instant('addToCart', 'Adicionou ao carrinho', { 'app.cart.items': 2 });
+      showScreen('cart', 'Carrinho');
+      if (o.cancelCheckout) {
+        instant('leaveCart', 'Saiu do carrinho');
+        endFlow(checkout, 'cancelled', 'userLeft');
+      } else {
+        const payOk = !o.paymentFails;
+        track(
+          'pay',
+          'Pagou',
+          { method: 'POST', route: '/v1/payments', status: payOk ? 201 : 502, ms: o.paymentMs ?? (payOk ? 980 : 3100) },
+          payOk ? 'success' : 'failure',
+          {},
+          payOk ? undefined : 'paymentUnavailable',
+        );
+        if (!o.checkoutOpen) endFlow(checkout, payOk ? 'success' : 'failure', payOk ? undefined : 'paymentUnavailable');
+      }
+    }
+    if (o.returns) {
+      showScreen('orders', 'Pedidos');
+      const returns = startFlow('returns', 'Devolução');
+      instant('requestReturn', 'Pediu a devolução');
+      endFlow(returns, o.returns, o.returns === 'failure' ? 'outsideReturnWindow' : o.returns === 'cancelled' ? 'changedMind' : undefined);
+    }
   }
 
   return {

@@ -104,6 +104,61 @@ linked to the trace. 404 when neither spans nor events exist.
 Distinct `services`, `versions`, `platforms`, `environments` and flow codes
 (`flows`) seen in the window, for filter dropdowns. Read from `rollups`.
 
+## `GET /api/overview`
+
+The overview page: how the journeys went in a period and what changed
+against another one. Reads only `rollups`.
+
+| Parameter | Default | |
+|---|---|---|
+| `period` | `24h` | `24h` (hourly slots), `7d` or `30d` (daily slots) |
+| `compare` | `previous` | `previous`: the period just before. `week`: the same hours a week earlier (`24h` only) |
+| `tz` | `UTC` | IANA time zone of the reader; days start at its midnight |
+| `service`, `version`, `platform`, `environment` | | exact match |
+
+```json
+{
+  "period": { "key": "24h", "from": "…", "to": "…" },
+  "previous": { "key": "previous", "from": "…", "to": "…" },
+  "slot": "hour", "slots": ["…"], "updatedAt": "…", "minVolume": 200,
+  "sessions": { "now": 2878, "before": 2886, "series": [ ] },
+  "failedSessions": { "now": 428, "before": 381, "series": [ ] },
+  "flows": [ { "code": "login", "label": "Login", "started": 2878, "success": 2678, "failure": 200,
+               "cancelled": 0, "completed": 0, "open": 0, "p95Ms": 5210,
+               "before": { "started": 2885, "failure": 114, "open": 0, "p95Ms": 5663 },
+               "series": { "started": [ ], "failure": [ ], "ended": [ ] },
+               "reasons": [ { "outcome": "failure", "reason": "blockedAccount", "errorType": null, "now": 92, "before": 38 } ],
+               "byVersion": [ { "version": "1.4.0", "platform": "ios", "started": 736, "failure": 110,
+                                "before": { "n": 742, "failure": 30 }, "series": { "started": [ ], "failure": [ ] } } ] } ],
+  "actions": [ { "code": "pay", "label": "Pagou", "n": 1472, "failure": 38, "measured": 1472, "p95Ms": 2877,
+                 "before": { "n": 1450, "failure": 26, "measured": 1450, "p95Ms": 1973 } } ],
+  "versions": [ { "version": "1.4.0", "platform": "ios", "sessions": 736, "failedSessions": 156,
+                  "before": { "sessions": 742, "failedSessions": 95 }, "flows": { "login": { "n": 736, "failure": 110 } } } ],
+  "changes": [ { "type": "failure", "direction": "worse", "code": "login", "label": "Login",
+                 "now": { "n": 2878, "failure": 200 }, "before": { "n": 2885, "failure": 114 },
+                 "since": "…", "where": { "version": "1.4.0", "platform": "ios", "share": 0.8 },
+                 "reason": { "reason": "blockedAccount", "errorType": null, "shareBefore": 0.37, "shareNow": 0.69, "beforeScope": "version" },
+                 "impact": 86 },
+               { "type": "duration", "direction": "worse", "code": "pay", "label": "Pagou",
+                 "nowMs": 2877, "beforeMs": 1973, "measured": 1472, "impact": 1332 } ]
+}
+```
+
+- Slots cover whole hours; the last one is the current, partial hour. To
+  compare like with like, the previous period's last hour counts only the
+  part of the current hour that has passed, so `before` can have decimals.
+- A flow run counts in the slot it started; `open` is started minus ended
+  (no end received yet).
+- `p95Ms` comes from the duration histogram (null under 20 values).
+- `changes`, worst first. A comparison needs `OVERVIEW_MIN_VOLUME` (200)
+  runs or measured actions on both sides, a two-proportion z score of at
+  least 3, and at least 0.5 percentage point and 20% of the earlier rate (25%
+  and 200 ms for durations). `where` is the version and platform holding at
+  least half of the difference; `reason` the reason whose share of the
+  failures moved at least 10 points; `since` the first slot of the last
+  stretch above the midpoint between the two rates. They say where to look,
+  not why.
+
 ## `GET /api/status`
 
 ```json

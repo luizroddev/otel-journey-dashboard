@@ -20,6 +20,8 @@ export interface Config {
   aggregateLagMs: number;
   /** TTL of `rollups`: the overview can look this far back. */
   rollupRetentionDays: number;
+  /** Smallest group the overview compares (flow runs, measured actions). */
+  overviewMinVolume: number;
   maxBodyBytes: number;
   maxRecordsPerRequest: number;
   /** When set, `/api` requires `Authorization: Bearer <token>`. */
@@ -62,6 +64,7 @@ export function loadConfig(): Config {
     aggregateEveryMs: int('AGGREGATE_EVERY_SECONDS', 15) * 1000,
     aggregateLagMs: int('AGGREGATE_LAG_SECONDS', 30) * 1000,
     rollupRetentionDays: int('ROLLUP_RETENTION_DAYS', 400),
+    overviewMinVolume: int('OVERVIEW_MIN_VOLUME', 200),
     maxBodyBytes: int('MAX_BODY_BYTES', 1024 * 1024),
     maxRecordsPerRequest: int('MAX_RECORDS_PER_REQUEST', 1000),
     apiToken: process.env.API_TOKEN || null,

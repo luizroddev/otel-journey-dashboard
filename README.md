@@ -16,7 +16,7 @@ Requirements: Docker, or Node 20+ and a MongoDB.
 
 ```bash
 docker compose up -d --build     # MongoDB + dashboard
-npm install && npm run seed      # optional: fictional sessions
+npm install && npm run seed      # optional: two days of fictional sessions, with a made-up incident
 ```
 
 - Dashboard: http://localhost:8686
@@ -38,6 +38,12 @@ npm run build && npm start        # or: npm run dev (Vite on :5173 + API)
 
 ## What you see
 
+- **Overview**: sessions, sessions with failures, failed flows and flows
+  with no conclusion, against the previous period or the same hours a week
+  earlier. "What changed" points at the flow, version, platform and reason
+  behind a difference, and at slower actions. Each flow shows how its runs
+  ended, its p95 and its failure rate over time, by version and by reason.
+  Every number opens the sessions behind it.
 - **Sessions**: filter by period, device, installation, user, session, app,
   version, platform, or only sessions with failures. A session that
   continues an expired one links back to it.
@@ -86,6 +92,7 @@ and writes MongoDB): [docs/backend-integration.md](docs/backend-integration.md).
 | `ROLLUP_RETENTION_DAYS` | `400` | TTL of the hourly counters |
 | `AGGREGATOR` | `on` | `off`: this instance only serves (modes `all`, `query`) |
 | `AGGREGATE_EVERY_SECONDS` / `AGGREGATE_LAG_SECONDS` | `15` / `30` | how often the aggregator runs, and how old a record must be before it reads it |
+| `OVERVIEW_MIN_VOLUME` | `200` | smallest group the overview compares (flow runs, measured actions) |
 | `MAX_BODY_BYTES` | `1048576` | per OTLP request (before gunzip) |
 | `MAX_RECORDS_PER_REQUEST` | `1000` | spans or log records |
 | `MAX_WINDOW_DAYS` | `31` | longest query period |

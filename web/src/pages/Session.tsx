@@ -16,7 +16,7 @@ export function SessionPage() {
     return (
       <div className="page empty">
         <p>{journey.error.message === 'not found' ? 'Sessão não encontrada ou já expirada.' : `Não foi possível carregar: ${journey.error.message}.`}</p>
-        <Link to="/">Voltar às sessões</Link>
+        <Link to="/sessions">Voltar às sessões</Link>
       </div>
     );
   return <SessionView data={journey.data} />;
@@ -50,7 +50,7 @@ function SessionView({ data }: { data: JourneyResponse }) {
       <div className="session-head">
         <div>
           <p className="crumb">
-            <Link to="/">Sessões</Link>
+            <Link to="/sessions">Sessões</Link>
           </p>
           <h1>
             Sessão <span className="mono">{shortId(session._id, 12)}</span>
@@ -69,7 +69,7 @@ function SessionView({ data }: { data: JourneyResponse }) {
             <dt>Aparelho</dt>
             <dd className="mono">
               {session.deviceId ? (
-                <Link to={`/?deviceId=${encodeURIComponent(session.deviceId)}&period=30d`}>{session.deviceId}</Link>
+                <Link to={`/sessions?deviceId=${encodeURIComponent(session.deviceId)}&period=30d`}>{session.deviceId}</Link>
               ) : (
                 <span className="muted" title="device.id só vem do servidor, a partir do que ele autenticou">
                   não informado
@@ -81,7 +81,7 @@ function SessionView({ data }: { data: JourneyResponse }) {
             <dt>Instalação</dt>
             <dd className="mono">
               {session.installationId ? (
-                <Link to={`/?installationId=${encodeURIComponent(session.installationId)}&period=30d`}>{session.installationId}</Link>
+                <Link to={`/sessions?installationId=${encodeURIComponent(session.installationId)}&period=30d`}>{session.installationId}</Link>
               ) : (
                 <span className="muted">não informada</span>
               )}

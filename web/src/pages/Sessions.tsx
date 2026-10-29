@@ -2,13 +2,22 @@ import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, type SessionSummary } from '../api';
 import { useAsync } from '../components/useAsync';
-import { fmtDateTime, fmtDuration, platformName, shortId } from '../format';
+import { fmtDateTime, fmtDuration, humanize, platformName, shortId } from '../format';
 
 const PERIODS = [
   { key: '1h', label: 'Última hora', ms: 3_600_000 },
   { key: '24h', label: 'Últimas 24 horas', ms: 86_400_000 },
   { key: '7d', label: 'Últimos 7 dias', ms: 7 * 86_400_000 },
   { key: '30d', label: 'Últimos 30 dias', ms: 30 * 86_400_000 },
+] as const;
+
+/** Filters set by the overview's links, shown as removable chips. */
+const DRILL = [
+  { key: 'flow', label: (v: string) => `Passou por ${humanize(v)}` },
+  { key: 'failedFlow', label: (v: string) => `Falhou em ${humanize(v)}` },
+  { key: 'failedAction', label: (v: string) => `Ação ${humanize(v)} falhou` },
+  { key: 'reason', label: (v: string) => `Motivo ${v}` },
+  { key: 'errorType', label: (v: string) => `error.type ${v}` },
 ] as const;
 
 const TEXT_FILTERS = [
@@ -38,7 +47,9 @@ export function SessionsPage() {
     version: params.get('version') ?? '',
     platform: params.get('platform') ?? '',
     onlyErrors: params.get('onlyErrors') === 'true',
+    ...Object.fromEntries(DRILL.map((d) => [d.key, params.get(d.key) ?? ''])),
   };
+  const drill = DRILL.filter((d) => params.get(d.key));
   const [pages, setPages] = useState<string[]>([]);
   const before = pages[pages.length - 1];
 
@@ -106,6 +117,19 @@ export function SessionsPage() {
         </button>
       </form>
 
+      {drill.length > 0 && (
+        <div className="chips" aria-label="Filtros vindos da visão geral">
+          {drill.map((d) => (
+            <span key={d.key} className="chip">
+              {d.label(params.get(d.key)!)}
+              <button type="button" aria-label={`Remover filtro ${d.label(params.get(d.key)!)}`} onClick={() => set(d.key, '')}>
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
       {sessions.status === 'loading' && <p className="empty">Carregando sessões…</p>}
       {sessions.status === 'error' && (
         <p className="empty error">Não foi possível carregar as sessões: {sessions.error.message}. Confira se a API está no ar.</p>
@@ -166,7 +190,7 @@ function EmptySessions({ filtered }: { filtered: boolean }) {
       <p>Nenhuma sessão recebida neste período.</p>
       <p>
         Aponte o app para o receptor OTLP (<code>http://localhost:4318</code>) ou gere dados fictícios com{' '}
-        <code>npm run seed</code>.
+        <code>npm run seed</code>. As sessões aparecem cerca de um minuto depois de os eventos chegarem.
       </p>
     </div>
   );
