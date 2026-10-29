@@ -4,6 +4,9 @@
 // payments) for the overview to find.
 //
 //   npm run seed -- [--endpoint http://localhost:4318] [--sessions 6000] [--days 2] [--seed 1]
+//
+// It only speaks OTLP: the receiver stores the sessions under its own
+// COLLECTION_PREFIX.
 import { parseArgs } from 'node:util';
 import { encode, syntheticSession, type SyntheticSession } from './lib/synthetic.js';
 

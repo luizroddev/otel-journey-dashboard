@@ -286,6 +286,15 @@ button {
 .field input {
   width: 12rem;
 }
+.field-count {
+  font-weight: 400;
+}
+.field-error {
+  margin: 0;
+  max-width: 12rem;
+  color: var(--failure);
+  font-size: var(--t-xs);
+}
 .check {
   display: inline-flex;
   align-items: center;
@@ -775,6 +784,15 @@ table.sessions {
   justify-content: space-between;
   align-items: baseline;
   margin-bottom: 0.5rem;
+}
+.detail-trace-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+}
+.external-link {
+  display: inline-block;
+  margin-top: 0.4rem;
 }
 
 /* Waterfall */

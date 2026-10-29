@@ -32,10 +32,14 @@ jobs:
         env:
           MONGO_URL: mongodb://localhost:27017
       - run: npm run build
-      - name: Conformance against the bundled receiver
+      - name: Conformance against the bundled receiver, with a collection prefix and a base path
+        env:
+          COLLECTION_PREFIX: journey_
         run: |
-          MONGO_URL=mongodb://localhost:27017 PORT=8686 node dist/server/src/index.js &
+          MONGO_URL=mongodb://localhost:27017 PORT=8686 BASE_PATH=/journey/ node dist/server/src/index.js &
           for i in $(seq 1 30); do curl -sf localhost:8686/health && break; sleep 1; done
+          curl -sf localhost:8686/journey/api/status
+          curl -sf localhost:8686/journey/sessions | grep -q 'src="/journey/assets/'
           npm run conformance
 
   docker:

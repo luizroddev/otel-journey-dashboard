@@ -1,4 +1,12 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { loadConfig, normalizeBasePath, type Config } from '../server/src/config.js';
+import { idList } from '../server/src/http/api.js';
+import { dashboardRoutes, indexHtml } from '../server/src/http/dashboard.js';
+import type { Store } from '../server/src/store/mongo.js';
+import { traceLinkUrl } from '../web/src/traceLink.js';
 import { mapLogs, mapSpans } from '../server/src/ingest/mapping.js';
 import { decodeLogs, decodeTraces } from '../server/src/otlp/decode.js';
 import { buildJourney } from '../server/src/query/journey.js';
@@ -311,5 +319,104 @@ describe('overview', () => {
     expect(findChanges([small, noise], [action(1100, 1000)], slots, { now: [], before: [] }, 200)).toEqual([]);
     const [slower] = findChanges([], [action(3400, 1900)], slots, { now: [], before: [] }, 200);
     expect(slower).toMatchObject({ type: 'duration', direction: 'worse', code: 'pay' });
+  });
+});
+
+describe('inside an existing environment', () => {
+  const withEnv = (env: Record<string, string>) => {
+    const saved = process.env;
+    // Vitest sets MODE=test.
+    process.env = { MODE: 'all', ...env };
+    try {
+      return loadConfig();
+    } finally {
+      process.env = saved;
+    }
+  };
+
+  it('reads the collection prefix, base path and trace link from the environment', () => {
+    const c = withEnv({ COLLECTION_PREFIX: 'journey_', BASE_PATH: 'journey', TRACE_LINK_TEMPLATE: 'https://logs.example.com/?q=trace.id:{traceId}' });
+    expect([c.collectionPrefix, c.basePath]).toEqual(['journey_', '/journey/']);
+    expect(c.traceLink).toEqual({ template: 'https://logs.example.com/?q=trace.id:{traceId}', label: 'Abrir no log' });
+    expect(withEnv({ TRACE_LINK_TEMPLATE: '/logs/{traceId}', TRACE_LINK_LABEL: 'Ver logs' }).traceLink!.label).toBe('Ver logs');
+
+    const plain = withEnv({});
+    expect([plain.collectionPrefix, plain.basePath, plain.traceLink]).toEqual(['', '/', null]);
+
+    expect(() => withEnv({ COLLECTION_PREFIX: 'a$b' })).toThrow(/COLLECTION_PREFIX/);
+    expect(() => withEnv({ TRACE_LINK_TEMPLATE: 'https://logs.example.com/' })).toThrow(/\{traceId\}/);
+    expect(() => withEnv({ TRACE_LINK_TEMPLATE: 'javascript:alert({traceId})' })).toThrow(/http/);
+  });
+
+  it('normalizes the base path and refuses what is not a plain path', () => {
+    expect(['', '/', 'journey', '/journey', '/journey/', 'tools//journey/'].map(normalizeBasePath)).toEqual([
+      '/',
+      '/',
+      '/journey/',
+      '/journey/',
+      '/journey/',
+      '/tools/journey/',
+    ]);
+    expect(() => normalizeBasePath('/a/../b')).toThrow(/BASE_PATH/);
+    expect(() => normalizeBasePath('/"><script>')).toThrow(/BASE_PATH/);
+  });
+
+  it('builds the external trace link with the trace id encoded', () => {
+    const template = 'https://logs.example.com/app/discover#/?query=trace.id:{traceId}&again={traceId}';
+    expect(traceLinkUrl(template, '0af7651916cd43dd8448eb211c80319c')).toBe(
+      'https://logs.example.com/app/discover#/?query=trace.id:0af7651916cd43dd8448eb211c80319c&again=0af7651916cd43dd8448eb211c80319c',
+    );
+    expect(traceLinkUrl(template, 'a b&c')).toContain('trace.id:a%20b%26c&');
+  });
+
+  it('takes several ids per filter, distinct, up to 50', () => {
+    expect(idList(undefined)).toEqual([]);
+    expect(idList(' demo-device-a, demo-device-b,,demo-device-a ')).toEqual(['demo-device-a', 'demo-device-b']);
+    expect(idList(Array.from({ length: 50 }, (_, i) => `d${i}`).join(','))).toHaveLength(50);
+    expect(idList(Array.from({ length: 51 }, (_, i) => `d${i}`).join(','))).toBeNull();
+  });
+
+  it('serves the UI, its assets and the API under the base path', async () => {
+    const built = `<html><head><meta name="base-path" content="/" />
+<script type="module" crossorigin src="./assets/index-1.js"></script>
+<link rel="stylesheet" crossorigin href="./assets/index-1.css"></head><body><a href="#acoes"></a></body></html>`;
+    expect(indexHtml(built, '/journey/')).toBe(built.replace('content="/"', 'content="/journey/"').replaceAll('"./assets/', '"/journey/assets/'));
+
+    const webDir = mkdtempSync(path.join(tmpdir(), 'journey-web-'));
+    try {
+      mkdirSync(path.join(webDir, 'assets'));
+      writeFileSync(path.join(webDir, 'index.html'), built);
+      writeFileSync(path.join(webDir, 'assets', 'index-1.js'), 'console.log(1)');
+      const config = {
+        mode: 'query',
+        basePath: '/journey/',
+        apiToken: null,
+        traceLink: { template: 'https://logs.example.com/{traceId}', label: 'Abrir no log' },
+      } as Config;
+      const app = dashboardRoutes({} as Store, config, webDir);
+
+      const page = await app.request('/journey/sessions/abc?deviceId=a,b');
+      expect(page.status).toBe(200);
+      const html = await page.text();
+      expect(html).toContain('<meta name="base-path" content="/journey/" />');
+      expect(html).toContain('src="/journey/assets/index-1.js"');
+      expect(await (await app.request('/journey/')).text()).toBe(html);
+      expect(await (await app.request('/journey/assets/index-1.js')).text()).toBe('console.log(1)');
+      expect(await (await app.request('/journey/api/config')).json()).toEqual({ traceLink: config.traceLink });
+
+      const root = await app.request('/');
+      expect([root.status, root.headers.get('location')]).toEqual([302, '/journey/']);
+      expect((await app.request('/health')).status).toBe(200);
+      expect((await app.request('/api/config')).status).toBe(404);
+      expect((await app.request('/assets/index-1.js')).status).toBe(404);
+
+      // Default: everything at the root, as before.
+      const plain = dashboardRoutes({} as Store, { ...config, basePath: '/', traceLink: null }, webDir);
+      expect(await (await plain.request('/sessions')).text()).toContain('src="/assets/index-1.js"');
+      expect(await (await plain.request('/assets/index-1.js')).text()).toBe('console.log(1)');
+      expect(await (await plain.request('/api/config')).json()).toEqual({ traceLink: null });
+    } finally {
+      rmSync(webDir, { recursive: true, force: true });
+    }
   });
 });

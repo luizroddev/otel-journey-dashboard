@@ -1,7 +1,8 @@
 # Query API
 
 JSON over HTTP, read by the dashboard UI. Served under `/api` in `all` and
-`query` modes. It is the dashboard's own read model, not OTLP JSON.
+`query` modes; with `BASE_PATH=/journey/`, under `/journey/api`. It is the
+dashboard's own read model, not OTLP JSON.
 
 When `API_TOKEN` is set, every request needs `Authorization: Bearer <token>`
 (the UI reads the token from `localStorage.apiToken`). In a company
@@ -14,7 +15,8 @@ Errors: `{ "error": "<message>" }` with 400 (invalid parameters), 401, 404.
 | Parameter | Default | |
 |---|---|---|
 | `from`, `to` | last 24 h | ISO 8601. Window clamped to `MAX_WINDOW_DAYS` (31) |
-| `deviceId`, `installationId`, `userId`, `sessionId` | | exact match |
+| `deviceId`, `installationId`, `userId` | | one or several values, comma separated: sessions of any of them. Spaces around values and repeats are ignored; values cannot contain commas. At most 50 per parameter (400 beyond) |
+| `sessionId` | | exact match |
 | `service`, `version`, `platform`, `environment` | | exact match |
 | `onlyErrors` | `false` | `true`: `errorCount > 0` |
 | `flow` | | sessions that started this flow |
@@ -158,6 +160,19 @@ against another one. Reads only `rollups`.
   failures moved at least 10 points; `since` the first slot of the last
   stretch above the midpoint between the two rates. They say where to look,
   not why.
+
+## `GET /api/config`
+
+Settings of this deployment that the UI needs.
+
+```json
+{ "traceLink": { "template": "https://logs.example.com/app/discover#/?query=trace.id:{traceId}", "label": "Abrir no log" } }
+```
+
+`traceLink` is null unless `TRACE_LINK_TEMPLATE` is set (`TRACE_LINK_LABEL`
+for the label, default "Abrir no log"). The UI replaces every `{traceId}`
+with the URL-encoded trace id and shows the link on the trace page and on
+each journey step that has a trace.
 
 ## `GET /api/status`
 

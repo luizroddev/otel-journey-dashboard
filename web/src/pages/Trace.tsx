@@ -1,5 +1,6 @@
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api';
+import { ExternalTraceLink } from '../components/ExternalTraceLink';
 import { useAsync } from '../components/useAsync';
 import { Waterfall } from '../components/Waterfall';
 import { fmtDateTime, fmtDuration, humanize } from '../format';
@@ -39,6 +40,7 @@ export function TracePage() {
           {fmtDuration(t.durationMs)}, {t.rows.length} spans em {t.services.join(', ') || 'serviço desconhecido'}
           {t.errorCount > 0 ? `, ${t.errorCount} com erro` : ''}
         </p>
+        <ExternalTraceLink traceId={t.traceId} className="external-link" />
         {t.events.length > 0 && (
           <p className="hint">
             Etapas da jornada neste trace:{' '}

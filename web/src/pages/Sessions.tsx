@@ -20,12 +20,17 @@ const DRILL = [
   { key: 'errorType', label: (v: string) => `error.type ${v}` },
 ] as const;
 
+/** `multiple`: several values at once (a person with several devices), as `a,b,c` in the URL. */
 const TEXT_FILTERS = [
-  { key: 'deviceId', label: 'Aparelho', placeholder: 'device.id' },
-  { key: 'installationId', label: 'Instalação', placeholder: 'app.installation.id' },
-  { key: 'userId', label: 'Usuário', placeholder: 'user.id' },
-  { key: 'sessionId', label: 'Sessão', placeholder: 'session.id' },
+  { key: 'deviceId', label: 'Aparelho', placeholder: 'device.id, …', multiple: true },
+  { key: 'installationId', label: 'Instalação', placeholder: 'app.installation.id, …', multiple: true },
+  { key: 'userId', label: 'Usuário', placeholder: 'user.id, …', multiple: true },
+  { key: 'sessionId', label: 'Sessão', placeholder: 'session.id', multiple: false },
 ] as const;
+/** Same limit as the API (MAX_IDS). */
+const MAX_IDS = 50;
+/** Values separated by commas, spaces or new lines, without repeats. */
+const splitIds = (text: string) => [...new Set(text.split(/[\s,]+/).filter(Boolean))];
 
 export function SessionsPage() {
   const [params, setParams] = useSearchParams();
@@ -86,7 +91,15 @@ export function SessionsPage() {
           </select>
         </div>
         {TEXT_FILTERS.map((f) => (
-          <TextFilter key={f.key} id={f.key} label={f.label} placeholder={f.placeholder} value={filters[f.key]} onCommit={(v) => set(f.key, v)} />
+          <TextFilter
+            key={f.key}
+            id={f.key}
+            label={f.label}
+            placeholder={f.placeholder}
+            multiple={f.multiple}
+            value={filters[f.key]}
+            onCommit={(v) => set(f.key, v)}
+          />
         ))}
         {(['service', 'version', 'platform'] as const).map((key) => {
           const options =
@@ -162,22 +175,58 @@ export function SessionsPage() {
   );
 }
 
-function TextFilter(props: { id: string; label: string; placeholder: string; value: string; onCommit: (v: string) => void }) {
-  const [draft, setDraft] = useState(props.value);
-  const commit = () => draft.trim() !== props.value && props.onCommit(draft.trim());
+function TextFilter(props: {
+  id: string;
+  label: string;
+  placeholder: string;
+  multiple: boolean;
+  value: string;
+  onCommit: (v: string) => void;
+}) {
+  const ids = props.multiple ? splitIds(props.value) : [];
+  const [draft, setDraft] = useState(ids.length ? ids.join(', ') : props.value);
+  const [tooMany, setTooMany] = useState(0);
+  const commit = () => {
+    if (!props.multiple) return draft.trim() !== props.value && props.onCommit(draft.trim());
+    const list = splitIds(draft);
+    setTooMany(list.length > MAX_IDS ? list.length : 0);
+    if (list.length > MAX_IDS) return;
+    setDraft(list.join(', '));
+    if (list.join(',') !== ids.join(',')) props.onCommit(list.join(','));
+  };
   return (
     <div className="field">
-      <label htmlFor={`f-${props.id}`}>{props.label}</label>
+      <label htmlFor={`f-${props.id}`}>
+        {props.label}
+        {ids.length > 1 && <span className="field-count"> ({ids.length})</span>}
+      </label>
       <input
         id={`f-${props.id}`}
         className="mono"
         value={draft}
         placeholder={props.placeholder}
+        title={props.multiple ? 'Um ou vários, separados por vírgula, espaço ou linha' : undefined}
         spellCheck={false}
+        aria-invalid={tooMany > 0 || undefined}
+        aria-describedby={tooMany ? `f-${props.id}-error` : undefined}
         onChange={(e) => setDraft(e.target.value)}
+        onPaste={(e) => {
+          // A text input drops line breaks: a pasted list would become one id.
+          const text = e.clipboardData.getData('text');
+          if (!props.multiple || !/[\r\n]/.test(text)) return;
+          e.preventDefault();
+          const el = e.currentTarget;
+          const start = el.selectionStart ?? draft.length;
+          setDraft(draft.slice(0, start) + splitIds(text).join(', ') + draft.slice(el.selectionEnd ?? start));
+        }}
         onBlur={commit}
         onKeyDown={(e) => e.key === 'Enter' && commit()}
       />
+      {tooMany > 0 && (
+        <p id={`f-${props.id}-error`} className="field-error">
+          Até {MAX_IDS} por busca ({tooMany} informados)
+        </p>
+      )}
     </div>
   );
 }

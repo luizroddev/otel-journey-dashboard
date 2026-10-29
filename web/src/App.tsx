@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { BrowserRouter, Link, NavLink, Route, Routes, useNavigate } from 'react-router-dom';
+import { basePath } from './api';
 import { OverviewPage } from './pages/Overview';
 import { SessionPage } from './pages/Session';
 import { SessionsPage } from './pages/Sessions';
@@ -48,7 +49,7 @@ function TopBar() {
 
 export function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={basePath.replace(/\/$/, '') || '/'}>
       <TopBar />
       <main>
         <Routes>

@@ -15,6 +15,9 @@ const config: Config = {
   mode: 'all',
   mongoUrl: url ?? '',
   mongoDb: `otel_journey_test_${process.pid}`,
+  collectionPrefix: '',
+  basePath: '/',
+  traceLink: null,
   otlpPort: 0,
   httpPort: 0,
   host: '127.0.0.1',
@@ -186,6 +189,46 @@ describe.skipIf(!url)('MongoDB end to end', () => {
     expect(await aggregate()).toBeNull();
     await store.jobs.updateOne({ _id: 'aggregate' }, { $set: { leaseUntil: new Date(0) } });
     expect(await aggregate()).not.toBeNull();
+  });
+
+  it('finds the sessions of several devices, installations or users at once', async () => {
+    const ids = async (q: string) => ((await get(`sessions?${q}`)).body.items as any[]).map((i) => i.installationId).sort();
+    expect(await ids('installationId=install-e2e,install-e2e-next')).toEqual(['install-e2e', 'install-e2e-next']);
+    // Spaces, empty values and repeats are ignored.
+    expect(await ids('installationId=%20install-e2e,,install-e2e,')).toEqual(['install-e2e']);
+    expect(await ids('installationId=install-e2e,nobody')).toEqual(['install-e2e']);
+    expect(await ids('userId=nobody,user-e2e')).toEqual(['install-e2e', 'install-e2e-next']);
+    expect(await ids('userId=user-e2e&installationId=install-e2e-next,nobody')).toEqual(['install-e2e-next']);
+    expect(await ids('deviceId=device-a,device-b')).toEqual([]);
+
+    const tooMany = Array.from({ length: 51 }, (_, i) => `device-${i}`).join(',');
+    expect((await get(`sessions?deviceId=${tooMany}`)).status).toBe(400);
+  });
+
+  it('keeps its collections under COLLECTION_PREFIX', async () => {
+    const prefixed = await connect(url!, config.mongoDb, 'journey_');
+    try {
+      await ensureIndexes(prefixed, { raw: true, derived: true });
+      const s = syntheticSession({ start: Date.now() - 20_000, installationId: 'install-prefix', userId: 'user-prefix' });
+      const receiver = ingestRoutes(prefixed, config);
+      for (const signal of ['traces', 'logs'] as const) {
+        const body = encode(signal, signal === 'traces' ? s.traces : s.logs) as BodyInit;
+        await receiver.request(`/v1/${signal}`, { method: 'POST', body, headers: { 'content-type': 'application/x-protobuf' } });
+      }
+      await aggregateOnce(prefixed, { now: new Date(), lagMs: 0, chunkMs: 60_000, owner: 'prefixed', leaseMs: 60_000, rollupRetentionDays: 400 });
+
+      const names = (await store.db.listCollections({}, { nameOnly: true }).toArray()).map((c) => c.name);
+      expect(names).toEqual(expect.arrayContaining(['spans', 'events', 'sessions', 'rollups', 'jobs'].map((n) => `journey_${n}`)));
+      const items = (await (await apiRoutes(prefixed, config).request('/sessions?installationId=install-prefix')).json()) as any;
+      expect(items.items).toHaveLength(1);
+      expect(await prefixed.events.countDocuments({ sessionId: s.sessionId })).toBe(s.counts.events);
+      // Nothing of it in the unprefixed collections, and nothing of theirs here.
+      expect(await store.events.countDocuments({ sessionId: s.sessionId })).toBe(0);
+      expect((await get('sessions?installationId=install-prefix')).body.items).toHaveLength(0);
+      expect(await prefixed.sessions.countDocuments({ installationId: 'install-e2e' })).toBe(0);
+    } finally {
+      await prefixed.close();
+    }
   });
 
   const snapshot = async () => {

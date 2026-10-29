@@ -27,6 +27,15 @@ function window(from: string | undefined, to: string | undefined, maxDays: numbe
   return { from: start < min ? min : start, to: end, clamped: start < min };
 }
 
+/** Most values a device, installation or user filter takes at once. */
+export const MAX_IDS = 50;
+
+/** `a,b,a` → `[a, b]`; null with more than MAX_IDS distinct values. */
+export function idList(value: string | undefined): string[] | null {
+  const ids = [...new Set((value ?? '').split(',').map((v) => v.trim()).filter(Boolean))];
+  return ids.length > MAX_IDS ? null : ids;
+}
+
 /** `failedFlow` or `failedAction`, with optional `reason` / `errorType`. */
 function failedFilter(q: Record<string, string>) {
   const kind = q.failedFlow ? 'flow' : q.failedAction ? 'action' : null;
@@ -53,13 +62,15 @@ export function apiRoutes(store: Store, config: Config) {
     const q = c.req.query();
     const w = window(q.from, q.to, config.maxWindowDays);
     if (!w) return c.json({ error: 'invalid period' }, 400);
+    const [deviceIds, installationIds, userIds] = [q.deviceId, q.installationId, q.userId].map(idList);
+    if (!deviceIds || !installationIds || !userIds) return c.json({ error: `at most ${MAX_IDS} values per id filter` }, 400);
     const limit = Math.min(Number(q.limit) || 50, config.maxPageSize);
     const before = q.before ? new Date(q.before) : undefined;
     const items = await listSessions(store, {
       ...w,
-      deviceId: q.deviceId || undefined,
-      installationId: q.installationId || undefined,
-      userId: q.userId || undefined,
+      deviceIds,
+      installationIds,
+      userIds,
       sessionId: q.sessionId || undefined,
       service: q.service || undefined,
       version: q.version || undefined,
@@ -105,6 +116,8 @@ export function apiRoutes(store: Store, config: Config) {
     const done = await aggregatedUpTo(store);
     return c.json({ aggregatedUpTo: done?.toISOString() ?? null });
   });
+
+  app.get('/config', (c) => c.json({ traceLink: config.traceLink }));
 
   app.get('/sessions/:id', async (c) => {
     const s = await getSession(store, c.req.param('id'));

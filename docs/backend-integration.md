@@ -57,20 +57,24 @@ does no read-modify-write per request.
    - insert only when `_id` is new: an unordered insert that ignores
      duplicate key errors is enough;
    - `receivedAt` is your clock at insert time;
-   - never write `sessions`, `rollups` or `jobs`.
+   - never write `sessions`, `rollups` or `jobs`;
+   - when the dashboard runs with `COLLECTION_PREFIX` (a database shared
+     with other applications), every name carries it: insert into
+     `journey_spans` and `journey_events`, not `spans` and `events`.
 6. **Limits.** Apply body size, records per request and per-device quotas
    according to your own policy.
 7. **Validate.** Run the conformance check against your backend:
 
    ```bash
    npm run conformance -- --endpoint https://telemetry.example.com \
-     --mongo "mongodb://..." --db otel_journey \
+     --mongo "mongodb://..." --db otel_journey [--prefix journey_] \
      --header "Authorization: Bearer <test token>" \
      --expect-device <device your backend will authenticate> --expect-user <user>
    ```
 
    It sends one fictional session twice (resends must not duplicate) and
-   checks 29 rules on what was stored in `spans` and `events`. Without
+   checks 29 rules on what was stored in `spans` and `events` (with
+   `--prefix`, or `COLLECTION_PREFIX` set, in the prefixed collections). Without
    `--expect-device`, `deviceId` must stay null.
 8. **Indexes.** Create the indexes of `spans` and `events` once, including
    `{receivedAt: 1}` on both (the bundled receiver does it when it starts in
@@ -81,6 +85,12 @@ does no read-modify-write per request.
    ```bash
    MODE=query MONGO_URL="mongodb://dashboard@..." MONGO_DB=otel_journey PORT=8686 npm start
    ```
+
+   Inside a portal you already have: `BASE_PATH=/journey/` when the proxy
+   mounts it on a sub path (it forwards the path without removing the
+   prefix), `COLLECTION_PREFIX=journey_` in a shared database, and
+   `TRACE_LINK_TEMPLATE` to open each trace in your log tool (see the
+   README, "Inside an existing environment").
 
    Its user reads `spans` and `events` and writes `sessions`, `rollups` and
    `jobs` (it creates their indexes). It never writes `spans` or `events`.
@@ -105,6 +115,13 @@ When writing MongoDB from your backend is not possible yet:
    The device header is the only source of `deviceId`; the user header
    replaces `user.id` from the payload.
 4. Another instance in `MODE=query` aggregates and serves the UI.
+
+## Searching by several devices
+
+A person can have several devices, installations and user ids. The device,
+installation and user filters take up to 50 values, separated by commas,
+spaces or lines (`/sessions?deviceId=a,b,c`), and show the sessions of any
+of them.
 
 ## Searching by another identifier
 
