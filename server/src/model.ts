@@ -1,6 +1,7 @@
 // Storage model. This is the MongoDB contract described in
-// docs/storage-schema.md: any service that writes these collections in this
-// shape (for example a BFF) can be read by the dashboard in `query` mode.
+// docs/storage-schema.md. Writers (the bundled receiver, or a BFF) only
+// insert `spans` and `events`; the dashboard derives `sessions` and
+// `rollups` from them.
 
 /** A JSON value decoded from an OTLP AnyValue. */
 export type AttrValue =
@@ -39,7 +40,6 @@ export interface CommonFields {
   outcomeReason: string | null;
   errorType: string | null;
   source: string | null;
-  resource: Attr[];
   scope: { name: string | null; version: string | null };
   receivedAt: Date;
   expireAt: Date;
@@ -50,6 +50,8 @@ export type Outcome = 'success' | 'failure' | 'cancelled' | 'completed';
 /** Collection `spans`. `_id` = `{service}:{traceId}:{spanId}`. */
 export interface SpanDoc extends CommonFields {
   _id: string;
+  /** Resource attributes without the projected ones (`service.name`, ...). */
+  resource: Attr[];
   traceId: string;
   spanId: string;
   parentSpanId: string | null;
@@ -86,10 +88,19 @@ export interface EventDoc extends CommonFields {
   durationMs: number | null;
   traceId: string | null;
   spanId: string | null;
+  /** Attributes without the projected ones. */
   attributes: Attr[];
 }
 
-/** Collection `sessions`: one summary per `session.id`, kept by ingestion. */
+/** A failure seen in a session: what failed and why. */
+export interface SessionFailure {
+  kind: 'flow' | 'action';
+  code: string;
+  reason: string | null;
+  errorType: string | null;
+}
+
+/** Collection `sessions`: one summary per `session.id`, derived by the aggregator. */
 export interface SessionDoc {
   _id: string;
   deviceId: string | null;
@@ -106,7 +117,70 @@ export interface SessionDoc {
   eventCount: number;
   spanCount: number;
   errorCount: number;
+  /** Codes of the flows started in the session. */
+  flows: string[];
+  /** Failed flow runs and actions, for drill-down from the overview. */
+  failures: SessionFailure[];
+  /** Upper bound of the last aggregation chunk applied (idempotency guard). */
+  upTo: Date;
   expireAt: Date;
+}
+
+export type RollupKind = 'session' | 'flow' | 'action';
+
+/**
+ * Collection `rollups`: counters per hour and dimension, derived by the
+ * aggregator. Counters are absent when zero.
+ */
+export interface RollupDoc {
+  /** JSON of `[hour, service, version, platform, environment, kind, code]`. */
+  _id: string;
+  hour: Date;
+  service: string | null;
+  version: string | null;
+  platform: string | null;
+  environment: string | null;
+  kind: RollupKind;
+  /** Flow or action code; empty for `session`. */
+  code: string;
+  label?: string | null;
+  /** Sessions started, flow runs started, or actions. */
+  n?: number;
+  /** Results. Flow runs count in the hour they started. */
+  success?: number;
+  failure?: number;
+  cancelled?: number;
+  completed?: number;
+  /** `session`: sessions whose first failure happened in this hour. */
+  failed?: number;
+  /** `reasons.{outcome}.{reason}`: `journey.outcome_reason` per result (keys escaped). */
+  reasons?: Partial<Record<Outcome, Record<string, number>>>;
+  /** `errors.{error.type}`: failures without a reason (keys escaped). */
+  errors?: Record<string, number>;
+  /** Duration histogram: index into DURATION_BOUNDS_MS, count. */
+  dur?: Record<string, number>;
+  upTo: Date;
+  expireAt: Date;
+}
+
+/**
+ * Upper bounds, in milliseconds, of the duration histogram buckets of
+ * `rollups.dur`. The last bucket has no upper bound.
+ */
+export const DURATION_BOUNDS_MS = [
+  50, 100, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 7500, 10_000, 15_000, 30_000, 60_000, 120_000, 300_000,
+  600_000,
+] as const;
+
+/** Collection `jobs`: state of the aggregator. */
+export interface JobDoc {
+  _id: string;
+  /** Everything received up to this instant is aggregated. */
+  done?: Date;
+  /** A chunk that started and may not have finished: redone first. */
+  pending?: Date | null;
+  owner?: string;
+  leaseUntil?: Date;
 }
 
 /** Attribute keys of the journey contract, version 2 (otel_flutter_bridge docs/specs/journey.md). */
@@ -137,6 +211,45 @@ export const Keys = {
   errorType: 'error.type',
   source: 'otel_flutter_bridge.source',
 } as const;
+
+/** Keys stored as fields of `spans` and `events`. */
+const projected = [
+  Keys.serviceName,
+  Keys.serviceVersion,
+  Keys.environment,
+  Keys.osName,
+  Keys.osType,
+  Keys.installationId,
+  Keys.sessionId,
+  Keys.userId,
+  Keys.screen,
+  Keys.flow,
+  Keys.flowInstanceId,
+  Keys.action,
+  Keys.actionInstanceId,
+  Keys.outcome,
+  Keys.outcomeReason,
+  Keys.errorType,
+  Keys.source,
+];
+
+/**
+ * Keys that writers leave out of `attributes` and `resource`, because a field
+ * holds them (lean documents). Events also project the labels, the duration
+ * and the event name; `log.record.uid` lives in their `_id`.
+ */
+export const ProjectedKeys = {
+  spans: new Set<string>(projected),
+  events: new Set<string>([
+    ...projected,
+    Keys.eventName,
+    Keys.logRecordUid,
+    Keys.screenLabel,
+    Keys.flowLabel,
+    Keys.actionLabel,
+    Keys.durationMs,
+  ]),
+};
 
 export const EventNames = {
   sessionStart: 'session.start',

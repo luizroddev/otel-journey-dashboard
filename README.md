@@ -54,9 +54,13 @@ npm run build && npm start        # or: npm run dev (Vite on :5173 + API)
 
 | `MODE` | Runs | Use |
 |---|---|---|
-| `all` (default) | OTLP receiver + UI + query API | Local, personal projects |
+| `all` (default) | OTLP receiver + aggregator + UI + query API | Local, personal projects |
 | `ingest` | OTLP receiver only | Receiver behind a proxy |
-| `query` | UI + query API only, read-only | A MongoDB filled by something else (a BFF) |
+| `query` | aggregator + UI + query API | A MongoDB where something else (a BFF) inserts spans and events |
+
+The receiver only inserts spans and events. The aggregator derives the
+session summaries and hourly counters from them, so whatever writes the
+records stays simple. Sessions show up within about a minute of arriving.
 
 Plugging it into a backend you already run (one that receives the telemetry
 and writes MongoDB): [docs/backend-integration.md](docs/backend-integration.md).
@@ -65,9 +69,9 @@ and writes MongoDB): [docs/backend-integration.md](docs/backend-integration.md).
 
 | | |
 |---|---|
-| [docs/storage-schema.md](docs/storage-schema.md) | MongoDB collections, fields and indexes. Whatever writes this can be read by `query` mode |
+| [docs/storage-schema.md](docs/storage-schema.md) | MongoDB collections, fields and indexes: what a writer inserts, what the dashboard derives |
 | [docs/query-api.md](docs/query-api.md) | The JSON API the UI reads |
-| `npm run conformance` | Sends a fictional session to a receiver and checks what it stored (31 checks) |
+| `npm run conformance` | Sends a fictional session to a receiver and checks what it stored (29 checks) |
 
 ## Configuration
 
@@ -78,7 +82,10 @@ and writes MongoDB): [docs/backend-integration.md](docs/backend-integration.md).
 | `MONGO_DB` | `otel_journey` | |
 | `OTLP_PORT` | `4318` | OTLP receiver |
 | `PORT` | `8686` | UI and API |
-| `RETENTION_DAYS` | `30` | TTL of stored records |
+| `RETENTION_DAYS` | `30` | TTL of stored records and sessions |
+| `ROLLUP_RETENTION_DAYS` | `400` | TTL of the hourly counters |
+| `AGGREGATOR` | `on` | `off`: this instance only serves (modes `all`, `query`) |
+| `AGGREGATE_EVERY_SECONDS` / `AGGREGATE_LAG_SECONDS` | `15` / `30` | how often the aggregator runs, and how old a record must be before it reads it |
 | `MAX_BODY_BYTES` | `1048576` | per OTLP request (before gunzip) |
 | `MAX_RECORDS_PER_REQUEST` | `1000` | spans or log records |
 | `MAX_WINDOW_DAYS` | `31` | longest query period |

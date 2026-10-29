@@ -1,8 +1,9 @@
 // Maps decoded OTLP into the stored documents (see model.ts). Pure, so the
-// same rules can be tested and reimplemented by another receiver.
+// same rules can be tested and reimplemented by another receiver. Keys that
+// become fields are left out of `attributes` and `resource` (lean documents).
 import { createHash } from 'node:crypto';
 import type { Attr, AttrValue, CommonFields, EventDoc, Outcome, SpanDoc } from '../model.js';
-import { Keys } from '../model.js';
+import { Keys, ProjectedKeys } from '../model.js';
 import type { OtlpLogRecord, OtlpScope, OtlpSpan, ResourceGroup } from '../otlp/decode.js';
 
 /** What the receiver knows about the sender, beyond the payload. */
@@ -51,6 +52,11 @@ function num(v: AttrValue | undefined): number | null {
   return null;
 }
 
+/** The attributes that did not become fields. */
+export function rest(list: Attr[], projected: Set<string>): Attr[] {
+  return list.filter((a) => !projected.has(a.key));
+}
+
 function common(
   resource: Attr[],
   attributes: Attr[],
@@ -80,7 +86,6 @@ function common(
     outcomeReason: str(a(Keys.outcomeReason)),
     errorType: str(a(Keys.errorType)),
     source: str(a(Keys.source)),
-    resource,
     scope,
     receivedAt: opts.now,
     expireAt: new Date(opts.now.getTime() + opts.retentionDays * 86_400_000),
@@ -97,6 +102,7 @@ export function mapSpans(groups: ResourceGroup<OtlpSpan>[], opts: MapOptions): S
         out.push({
           ...c,
           _id: `${c.service ?? ''}:${span.traceId}:${span.spanId}`,
+          resource: rest(g.resource, ProjectedKeys.spans),
           traceId: span.traceId,
           spanId: span.spanId,
           parentSpanId: span.parentSpanId,
@@ -109,7 +115,7 @@ export function mapSpans(groups: ResourceGroup<OtlpSpan>[], opts: MapOptions): S
           durationMs: nsDiffMs(span.startNs, span.endNs),
           statusCode: span.statusCode,
           statusMessage: span.statusMessage,
-          attributes: span.attributes,
+          attributes: rest(span.attributes, ProjectedKeys.spans),
           events: span.events.map((e) => ({ ...e, time: nsToDate(e.timeNs) })),
           links: span.links,
         });
@@ -141,7 +147,7 @@ export function mapLogs(groups: ResourceGroup<OtlpLogRecord>[], opts: MapOptions
           durationMs: num(a(Keys.durationMs)),
           traceId: rec.traceId,
           spanId: rec.spanId,
-          attributes: rec.attributes,
+          attributes: rest(rec.attributes, ProjectedKeys.events),
         });
       }
     }

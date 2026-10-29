@@ -1,6 +1,7 @@
 // Builds the span tree of a trace as an ordered list with depth, flagging
 // spans whose parent was never received. Pure.
-import type { SpanDoc } from '../model.js';
+import type { Attr, AttrValue, SpanDoc } from '../model.js';
+import { Keys } from '../model.js';
 
 export interface TraceRow {
   span: SpanDoc;
@@ -19,6 +20,39 @@ export interface TraceView {
   services: string[];
   errorCount: number;
   missingParents: number;
+}
+
+/**
+ * The span with the attributes that were stored as fields put back, so the
+ * trace shows what the app sent. Lean documents leave them out of
+ * `attributes`; a writer that kept them is not shown twice.
+ */
+export function withContext(span: SpanDoc): SpanDoc {
+  const fields: [string, AttrValue][] = [
+    [Keys.sessionId, span.sessionId],
+    [Keys.userId, span.userId],
+    [Keys.screen, span.screen],
+    [Keys.flow, span.flow],
+    [Keys.flowInstanceId, span.flowInstanceId],
+    [Keys.action, span.actionName],
+    [Keys.actionInstanceId, span.actionInstanceId],
+    [Keys.outcome, span.outcome],
+    [Keys.outcomeReason, span.outcomeReason],
+    [Keys.errorType, span.errorType],
+    [Keys.source, span.source],
+  ];
+  const resource: [string, AttrValue][] = [
+    [Keys.serviceName, span.service],
+    [Keys.serviceVersion, span.serviceVersion],
+    [Keys.environment, span.environment],
+    [Keys.osName, span.platform],
+    [Keys.installationId, span.installationId],
+  ];
+  const merge = (pairs: [string, AttrValue][], list: Attr[] = []): Attr[] => {
+    const have = new Set(list.map((a) => a.key));
+    return [...pairs.filter(([k, v]) => v !== null && !have.has(k)).map(([key, value]) => ({ key, value })), ...list];
+  };
+  return { ...span, attributes: merge(fields, span.attributes), resource: merge(resource, span.resource) };
 }
 
 export function buildTrace(traceId: string, spans: SpanDoc[]): TraceView {

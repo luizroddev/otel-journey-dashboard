@@ -1,6 +1,7 @@
 // Conformance check for any receiver that writes the dashboard's MongoDB
 // (docs/storage-schema.md): sends one fictional session to its OTLP
-// endpoint, then checks what landed in MongoDB.
+// endpoint, then checks the `spans` and `events` it inserted. Sessions and
+// rollups are the dashboard's job, so they are not checked here.
 //
 //   npm run conformance -- --endpoint http://localhost:4318 \
 //     --mongo mongodb://localhost:27017 --db otel_journey [--header "Authorization: Bearer x"]
@@ -12,6 +13,7 @@
 import { randomBytes } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { MongoClient } from 'mongodb';
+import { ProjectedKeys } from '../server/src/model.js';
 import { encode, syntheticSession } from './lib/synthetic.js';
 
 const { values } = parseArgs({
@@ -59,13 +61,11 @@ try {
   const db = client.db(values.db!);
   const events = await db.collection('events').find({ sessionId: s.sessionId }).sort({ time: 1 }).toArray();
   const spans = await db.collection('spans').find({ sessionId: s.sessionId }).toArray();
-  const session = await db.collection('sessions').findOne({ _id: s.sessionId as never });
   const device = values['expect-device'] ?? null;
   const user = values['expect-user'] ?? `${installationId}-user`;
 
   check(events.length === s.counts.events, 'every log record is one document in `events`, resends included', `${events.length}/${s.counts.events}`);
   check(spans.length === (s.counts.spans / 3) * 2, 'every app span is one document in `spans`, resends included', `${spans.length}`);
-  check(!!session, 'a `sessions` summary exists for session.id');
 
   const isDate = (v: unknown) => v instanceof Date && !Number.isNaN(v.getTime());
   const isNs = (v: unknown) => typeof v === 'string' && /^\d+$/.test(v);
@@ -74,13 +74,20 @@ try {
   check(events.every((e) => isDate(e.time) && isNs(e.timeNs)), 'events: time is a Date, timeNs a decimal string');
   check(events.every((e) => isDate(e.expireAt) && isDate(e.receivedAt)), 'events: receivedAt and expireAt are Dates');
   check(events.every((e) => typeof e.eventName === 'string'), 'events: eventName is set');
-  const uidOf = (e: Record<string, unknown>) =>
-    (e.attributes as { key: string; value: unknown }[]).find((a) => a.key === 'log.record.uid')?.value;
-  check(events.every((e) => String(e._id) === `${e.service}:${uidOf(e)}`), 'events: _id is {service}:{log.record.uid}');
+  const ids = new Set(s.uids.map((u) => `demo-shop:${u}`));
+  check(events.every((e) => ids.has(String(e._id))), 'events: _id is {service}:{log.record.uid}');
   check(events.every((e) => e.deviceId === device), 'events: deviceId', `expected ${device}`);
   check(events.every((e) => e.installationId === installationId), 'events: installationId from app.installation.id');
   check(events.some((e) => e.userId === user) && events.some((e) => e.userId === null), 'events: userId set after login, null before');
-  check(events.every((e) => Array.isArray(e.attributes) && Array.isArray(e.resource)), 'events: attributes and resource are [{key, value}]');
+  type Pairs = { key: string; value: unknown }[];
+  const lean = (list: unknown, projected: Set<string>) =>
+    Array.isArray(list) && (list as Pairs).every((a) => typeof a.key === 'string' && !projected.has(a.key));
+  check(events.every((e) => lean(e.attributes, ProjectedKeys.events)), 'events: attributes are [{key, value}] without the keys stored as fields');
+  check(events.every((e) => !('resource' in e)), 'events: no resource (it is the same for the whole session)');
+  check(
+    events.some((e) => (e.attributes as Pairs).some((a) => a.key === 'app.login.method')),
+    "events: the app's own attributes are kept",
+  );
   const measured = events.filter((e) => e.eventName === 'journey.action' && e.durationMs !== null);
   check(measured.length === 3, 'events: measured actions have durationMs', `${measured.length}`);
   check(measured.every((e) => isHex(e.traceId, 32) && isHex(e.spanId, 16)), 'events: measured actions carry hex traceId/spanId');
@@ -95,15 +102,12 @@ try {
   check(spans.every((x) => isDate(x.start) && isDate(x.end) && isNs(x.startNs) && typeof x.durationMs === 'number'), 'spans: start/end Dates, startNs string, durationMs number');
   check(spans.some((x) => x.parentSpanId === null) && spans.some((x) => isHex(x.parentSpanId, 16)), 'spans: parentSpanId null for roots, hex otherwise');
   check(spans.some((x) => x.statusCode === 2), 'spans: statusCode is the OTLP number');
-
-  if (session) {
-    check(session.eventCount === s.counts.events, 'sessions: eventCount', `${session.eventCount}`);
-    check(session.errorCount === (s.counts.events > 0 ? 1 : 0), 'sessions: errorCount counts one per failed operation', `${session.errorCount}`);
-    check(session.deviceId === device, 'sessions: deviceId');
-    check(session.installationId === installationId, 'sessions: installationId');
-    check(Array.isArray(session.userIds) && session.userIds.includes(user), 'sessions: userIds');
-    check(isDate(session.firstSeen) && isDate(session.lastSeen) && session.firstSeen <= session.lastSeen, 'sessions: firstSeen <= lastSeen');
-  }
+  check(spans.every((x) => isDate(x.receivedAt) && isDate(x.expireAt)), 'spans: receivedAt and expireAt are Dates');
+  check(
+    spans.every((x) => lean(x.attributes, ProjectedKeys.spans) && lean(x.resource, ProjectedKeys.spans)),
+    'spans: attributes and resource without the keys stored as fields',
+  );
+  check(spans.every((x) => x.sessionId === s.sessionId && x.installationId === installationId), 'spans: sessionId and installationId');
 } finally {
   await client.close();
 }

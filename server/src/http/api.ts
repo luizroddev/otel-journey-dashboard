@@ -1,8 +1,9 @@
 // Query API read by the dashboard. Contract in docs/query-api.md.
 import { Hono } from 'hono';
+import { aggregatedUpTo } from '../aggregate/aggregator.js';
 import type { Config } from '../config.js';
 import { buildJourney } from '../query/journey.js';
-import { buildTrace } from '../query/trace.js';
+import { buildTrace, withContext } from '../query/trace.js';
 import {
   facets,
   getSession,
@@ -23,6 +24,18 @@ function window(from: string | undefined, to: string | undefined, maxDays: numbe
   if (start > end) return null;
   const min = new Date(end.getTime() - maxDays * DAY);
   return { from: start < min ? min : start, to: end, clamped: start < min };
+}
+
+/** `failedFlow` or `failedAction`, with optional `reason` / `errorType`. */
+function failedFilter(q: Record<string, string>) {
+  const kind = q.failedFlow ? 'flow' : q.failedAction ? 'action' : null;
+  if (!kind) return undefined;
+  return {
+    kind,
+    code: (kind === 'flow' ? q.failedFlow : q.failedAction)!,
+    reason: q.reason || undefined,
+    errorType: q.errorType || undefined,
+  } as const;
 }
 
 export function apiRoutes(store: Store, config: Config) {
@@ -52,6 +65,8 @@ export function apiRoutes(store: Store, config: Config) {
       platform: q.platform || undefined,
       environment: q.environment || undefined,
       onlyErrors: q.onlyErrors === 'true',
+      flow: q.flow || undefined,
+      failed: failedFilter(q),
       limit: limit + 1,
       before: before && !Number.isNaN(before.getTime()) ? before : undefined,
     });
@@ -61,6 +76,11 @@ export function apiRoutes(store: Store, config: Config) {
       nextBefore: items.length > limit ? page[page.length - 1]!.lastSeen.toISOString() : null,
       period: { from: w.from.toISOString(), to: w.to.toISOString(), clamped: w.clamped },
     });
+  });
+
+  app.get('/status', async (c) => {
+    const done = await aggregatedUpTo(store);
+    return c.json({ aggregatedUpTo: done?.toISOString() ?? null });
   });
 
   app.get('/sessions/:id', async (c) => {
@@ -95,7 +115,7 @@ export function apiRoutes(store: Store, config: Config) {
     ]);
     if (spans.length === 0 && events.length === 0) return c.json({ error: 'not found' }, 404);
     return c.json({
-      ...buildTrace(traceId, spans.slice(0, config.maxTraceSpans)),
+      ...buildTrace(traceId, spans.slice(0, config.maxTraceSpans).map(withContext)),
       events,
       truncated: spans.length > config.maxTraceSpans,
     });
