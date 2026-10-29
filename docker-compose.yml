@@ -1,0 +1,28 @@
+# Local setup: MongoDB plus the dashboard in MODE=all.
+#   docker compose up -d --build
+# OTLP receiver: http://localhost:4318   Dashboard: http://localhost:8686
+services:
+  mongo:
+    # On a Linux host with kernel 6.19 to 7.0.13, MongoDB 8 does not start
+    # (TCMalloc incompatibility): use mongo:7 there, on a new volume.
+    image: mongo:8
+    ports: ["27017:27017"]
+    volumes: [mongo-data:/data/db]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 })"]
+      interval: 5s
+      retries: 20
+
+  dashboard:
+    build: .
+    environment:
+      MODE: all
+      MONGO_URL: mongodb://mongo:27017
+      MONGO_DB: otel_journey
+    ports: ["4318:4318", "8686:8686"]
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+volumes:
+  mongo-data:
