@@ -170,4 +170,15 @@ This repository only contains fictional data (the `demo-shop` sessions of
 
 ## License
 
-Apache 2.0.
+Apache 2.0. See [LICENSE](LICENSE). Commercial use is allowed; keep the
+license text and its notices when you redistribute the code. Third-party
+material (OpenTelemetry protocol files, IBM Plex fonts, npm dependencies) is
+listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md); the Docker image
+carries both files.
+
+## Trademarks
+
+OpenTelemetry is a trademark of The Linux Foundation. MongoDB is a trademark
+of MongoDB, Inc. This is an independent project: it is not affiliated with,
+sponsored by or endorsed by either. The names describe what the dashboard
+works with.
