@@ -92,6 +92,20 @@ and writes MongoDB): [docs/backend-integration.md](docs/backend-integration.md).
   filters take up to 50 values, separated by commas, spaces or lines: paste
   the list and see all their sessions at once.
 
+## Adopting it in another system
+
+Taking the dashboard and the library into a system that already exists
+covers discovery, architecture decisions, the receiver in your backend's
+language, deployment behind a portal, volume and cost, privacy, validation
+and rollout. It is written up, with no assumptions about any company or
+stack, in the library repository (Portuguese):
+
+- [Adoption guide](https://github.com/luizroddev/otel_flutter_bridge/blob/main/docs/adoption-guide.pt-BR.md):
+  the full technical reference, self-contained.
+- [Adoption prompt](https://github.com/luizroddev/otel_flutter_bridge/blob/main/docs/adoption-prompt.pt-BR.md):
+  a ready-to-use prompt for an AI coding agent to run that adoption phase
+  by phase.
+
 ## Contracts
 
 | | |

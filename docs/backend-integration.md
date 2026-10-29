@@ -18,6 +18,11 @@ Local:          app ──OTLP──► dashboard (MODE=all) ──► MongoDB
 Your backend:   app ──OTLP──► backend (authenticates, inserts) ──► MongoDB ◄── dashboard (MODE=query: aggregates, serves) ◄── your SSO proxy
 ```
 
+The whole adoption (discovery, decisions, app, receiver, dashboard,
+rollout) is in the
+[adoption guide](https://github.com/luizroddev/otel_flutter_bridge/blob/main/docs/adoption-guide.pt-BR.md)
+of the library (Portuguese), section 8 for the receiver.
+
 Your backend only inserts. Session summaries and the hourly counters of the
 overview are computed by the dashboard, so the backend keeps no state and
 does no read-modify-write per request.
