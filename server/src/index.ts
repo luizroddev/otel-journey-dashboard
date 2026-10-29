@@ -2,20 +2,18 @@
 // dashboard; `ingest` only the receiver; `query` the aggregator and the
 // dashboard, reading spans and events that something else (for example a
 // BFF) inserts.
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
-import { serveStatic } from '@hono/node-server/serve-static';
-import { Hono } from 'hono';
 import { startAggregator } from './aggregate/aggregator.js';
 import { loadConfig } from './config.js';
-import { apiRoutes } from './http/api.js';
+import { dashboardRoutes } from './http/dashboard.js';
 import { ingestRoutes } from './http/ingest.js';
 import { connect, ensureIndexes } from './store/mongo.js';
 
 const config = loadConfig();
-const store = await connect(config.mongoUrl, config.mongoDb);
+const store = await connect(config.mongoUrl, config.mongoDb, config.collectionPrefix);
 const aggregates = config.mode !== 'ingest' && config.aggregator;
 await ensureIndexes(store, { raw: config.mode !== 'query', derived: aggregates });
 const stopAggregator = aggregates ? startAggregator(store, config) : () => {};
@@ -26,23 +24,15 @@ if (config.mode !== 'query') {
 }
 
 if (config.mode !== 'ingest') {
-  const app = new Hono();
-  app.get('/health', (c) => c.json({ ok: true, mode: config.mode }));
-  app.route('/api', apiRoutes(store, config));
-
   const here = path.dirname(fileURLToPath(import.meta.url));
   // The built UI (npm run build); in development Vite serves it instead.
   const webDir = [path.resolve(here, '../../web'), path.resolve(process.cwd(), 'dist/web')].find(
     (d) => existsSync(path.join(d, 'index.html')) && existsSync(path.join(d, 'assets')),
   );
-  if (webDir) {
-    const root = path.relative(process.cwd(), webDir) || '.';
-    const index = path.join(webDir, 'index.html');
-    app.use('/*', serveStatic({ root }));
-    app.get('*', (c) => c.html(readFileSync(index, 'utf8'))); // client-side routes
-  }
-  serve({ fetch: app.fetch, port: config.httpPort, hostname: config.host });
-  console.log(`Dashboard on http://localhost:${config.httpPort}${webDir ? '' : ' (API only: run npm run build for the UI)'}`);
+  serve({ fetch: dashboardRoutes(store, config, webDir).fetch, port: config.httpPort, hostname: config.host });
+  console.log(
+    `Dashboard on http://localhost:${config.httpPort}${config.basePath}${webDir ? '' : ' (API only: run npm run build for the UI)'}`,
+  );
 }
 
 const stop = async () => {

@@ -14,17 +14,18 @@ export interface Store {
   close(): Promise<void>;
 }
 
-export async function connect(url: string, dbName: string): Promise<Store> {
+/** [prefix] goes before every collection name (`journey_spans`), so the dashboard can share a database. */
+export async function connect(url: string, dbName: string, prefix = ''): Promise<Store> {
   const client = new MongoClient(url);
   await client.connect();
   const db = client.db(dbName);
   return {
     db,
-    spans: db.collection<SpanDoc>('spans'),
-    events: db.collection<EventDoc>('events'),
-    sessions: db.collection<SessionDoc>('sessions'),
-    rollups: db.collection<RollupDoc>('rollups'),
-    jobs: db.collection<JobDoc>('jobs'),
+    spans: db.collection<SpanDoc>(`${prefix}spans`),
+    events: db.collection<EventDoc>(`${prefix}events`),
+    sessions: db.collection<SessionDoc>(`${prefix}sessions`),
+    rollups: db.collection<RollupDoc>(`${prefix}rollups`),
+    jobs: db.collection<JobDoc>(`${prefix}jobs`),
     close: () => client.close(),
   };
 }
@@ -91,9 +92,10 @@ export const writeEvents = (s: Store, docs: EventDoc[]) => insertNew(s.events, d
 export interface SessionQuery {
   from: Date;
   to: Date;
-  deviceId?: string;
-  installationId?: string;
-  userId?: string;
+  /** Any of these devices, installations or users (a person with several devices). */
+  deviceIds?: string[];
+  installationIds?: string[];
+  userIds?: string[];
   sessionId?: string;
   service?: string;
   version?: string;
@@ -115,9 +117,9 @@ export async function listSessions(s: Store, q: SessionQuery): Promise<SessionDo
     expireAt: { $gt: new Date() },
   };
   if (q.sessionId) f._id = q.sessionId;
-  if (q.deviceId) f.deviceId = q.deviceId;
-  if (q.installationId) f.installationId = q.installationId;
-  if (q.userId) f.userIds = q.userId;
+  if (q.deviceIds?.length) f.deviceId = { $in: q.deviceIds };
+  if (q.installationIds?.length) f.installationId = { $in: q.installationIds };
+  if (q.userIds?.length) f.userIds = { $in: q.userIds };
   if (q.service) f.services = q.service;
   if (q.version) f.versions = q.version;
   if (q.platform) f.platforms = q.platform;

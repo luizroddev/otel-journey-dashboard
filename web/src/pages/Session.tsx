@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api, type FlowRun, type JourneyResponse, type JourneyStep } from '../api';
 import { Attributes } from '../components/Attributes';
+import { ExternalTraceLink } from '../components/ExternalTraceLink';
 import { JourneyRail, lineColor, stepTitle } from '../components/JourneyRail';
 import { useAsync } from '../components/useAsync';
 import { Waterfall } from '../components/Waterfall';
@@ -89,7 +90,16 @@ function SessionView({ data }: { data: JourneyResponse }) {
           </div>
           <div>
             <dt>Usuário</dt>
-            <dd className="mono">{session.userIds.length ? session.userIds.join(', ') : 'não autenticou'}</dd>
+            <dd className="mono">
+              {session.userIds.length
+                ? session.userIds.map((u, i) => (
+                    <span key={u}>
+                      {i > 0 && ', '}
+                      <Link to={`/sessions?userId=${encodeURIComponent(u)}&period=30d`}>{u}</Link>
+                    </span>
+                  ))
+                : 'não autenticou'}
+            </dd>
           </div>
           <div>
             <dt>App</dt>
@@ -273,7 +283,12 @@ function StepDetail({ step, run, start, lineColor: color }: { step: JourneyStep;
       <section className="detail-trace" aria-label="Detalhe técnico">
         <div className="detail-trace-head">
           <h3>Detalhe técnico</h3>
-          {step.traceId && <Link to={`/traces/${step.traceId}`}>Abrir trace inteiro</Link>}
+          {step.traceId && (
+            <span className="detail-trace-links">
+              <Link to={`/traces/${step.traceId}`}>Abrir trace inteiro</Link>
+              <ExternalTraceLink traceId={step.traceId} />
+            </span>
+          )}
         </div>
         {!step.traceId && (
           <p className="hint">

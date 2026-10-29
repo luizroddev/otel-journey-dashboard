@@ -7,6 +7,16 @@ A **writer** (the bundled receiver, a BFF, a collector exporter) only
 `rollups` from them, with its aggregator. `npm run conformance` checks a
 writer against this document.
 
+## Collection names
+
+`spans`, `events`, `sessions`, `rollups` and `jobs`. When the dashboard runs
+with `COLLECTION_PREFIX` (for example `journey_`, to share a database with
+other applications), every name carries it: `journey_spans`,
+`journey_events`, `journey_sessions`, `journey_rollups`, `journey_jobs`.
+Writers use the same prefix. The rest of this document uses the bare names.
+
+## Conventions
+
 Field names are camelCase. Ids are lowercase hex. Times are BSON `Date`
 (millisecond precision) **plus** a decimal string with the original
 nanoseconds, because OTLP timestamps are 64-bit nanoseconds.

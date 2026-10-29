@@ -211,6 +211,12 @@ export interface Overview {
   changes: Change[];
 }
 
+/** Settings of this deployment for the UI (`/api/config`). */
+export interface UiConfig {
+  /** Link from a trace to the environment's log tool: `{traceId}` in the template. */
+  traceLink: { template: string; label: string } | null;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -220,11 +226,14 @@ export class ApiError extends Error {
   }
 }
 
+/** Where the dashboard is served (BASE_PATH, `/journey/`), written by the server into index.html. */
+export const basePath = document.querySelector<HTMLMetaElement>('meta[name="base-path"]')?.content || '/';
+
 const token = () => localStorage.getItem('apiToken');
 
 async function get<T>(path: string): Promise<T> {
   const t = token();
-  const r = await fetch(`/api/${path}`, { headers: t ? { authorization: `Bearer ${t}` } : {} });
+  const r = await fetch(`${basePath}api/${path}`, { headers: t ? { authorization: `Bearer ${t}` } : {} });
   if (!r.ok) {
     let message = `HTTP ${r.status}`;
     try {
@@ -242,6 +251,9 @@ const qs = (o: Record<string, string | undefined | null | boolean>) =>
     Object.entries(o).filter((e): e is [string, string | boolean] => e[1] !== undefined && e[1] !== null && e[1] !== '' && e[1] !== false).map(([k, v]) => [k, String(v)]),
   ).toString();
 
+// Fixed while the page is open: read once, again only after a failure.
+let uiConfig: Promise<UiConfig> | undefined;
+
 export const api = {
   sessions: (q: Record<string, string | undefined | boolean>) => get<SessionsPage>(`sessions?${qs(q)}`),
   journey: (id: string) => get<JourneyResponse>(`sessions/${encodeURIComponent(id)}/journey`),
@@ -249,4 +261,9 @@ export const api = {
   facets: (from: string, to: string) => get<Facets>(`facets?${qs({ from, to })}`),
   overview: (q: Record<string, string | undefined>) => get<Overview>(`overview?${qs(q)}`),
   status: () => get<{ aggregatedUpTo: string | null }>('status'),
+  config: () =>
+    (uiConfig ??= get<UiConfig>('config').catch((e: unknown) => {
+      uiConfig = undefined;
+      throw e;
+    })),
 };

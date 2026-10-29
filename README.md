@@ -45,8 +45,9 @@ npm run build && npm start        # or: npm run dev (Vite on :5173 + API)
   ended, its p95 and its failure rate over time, by version and by reason.
   Every number opens the sessions behind it.
 - **Sessions**: filter by period, device, installation, user, session, app,
-  version, platform, or only sessions with failures. A session that
-  continues an expired one links back to it.
+  version, platform, or only sessions with failures. Device, installation
+  and user take several values at once (a person with several devices). A
+  session that continues an expired one links back to it.
 - **Journey**: the session as a line. Screens are stations, actions are
   stops, each flow run is a colored stretch with its result. Failed steps
   are red; a flow that started and never ended shows "no conclusion", not
@@ -54,7 +55,8 @@ npm run build && npm start        # or: npm run dev (Vite on :5173 + API)
 - **Step detail**: result, reason and duration, screen, flow and attempt, user,
   origin (Flutter or native), the app's own attributes, and the waterfall of
   the step's trace (app spans, HTTP, backend spans) with every attribute.
-- **Trace**: any trace by id, with missing parents and truncation flagged.
+- **Trace**: any trace by id, with missing parents and truncation flagged,
+  and a link to the same trace in your log tool when configured.
 
 ## Modes
 
@@ -71,6 +73,25 @@ records stays simple. Sessions show up within about a minute of arriving.
 Plugging it into a backend you already run (one that receives the telemetry
 and writes MongoDB): [docs/backend-integration.md](docs/backend-integration.md).
 
+## Inside an existing environment
+
+- **A shared database.** `COLLECTION_PREFIX=journey_` puts every collection
+  under that prefix (`journey_spans`, `journey_events`, `journey_sessions`,
+  `journey_rollups`, `journey_jobs`). A backend that writes spans and events
+  itself uses the same names.
+- **A sub path behind a reverse proxy.** `BASE_PATH=/journey/` serves the
+  UI, its assets and `/api` under that path; `/` redirects there. The proxy
+  forwards the path as it is, without removing the prefix. The base is read
+  at runtime, so one build (or image) serves any path. `/health` stays at
+  the root, for probes; the OTLP port does not change.
+- **The log tool you already use.** With
+  `TRACE_LINK_TEMPLATE=https://logs.example.com/app/discover#/?query=trace.id:{traceId}`,
+  the trace page and every journey step that has a trace link to it, in a
+  new tab (`{traceId}` is URL-encoded). `TRACE_LINK_LABEL` names the link.
+- **One person, several devices.** The device, installation and user
+  filters take up to 50 values, separated by commas, spaces or lines: paste
+  the list and see all their sessions at once.
+
 ## Contracts
 
 | | |
@@ -86,6 +107,10 @@ and writes MongoDB): [docs/backend-integration.md](docs/backend-integration.md).
 | `MODE` | `all` | `all`, `ingest`, `query` |
 | `MONGO_URL` | `mongodb://localhost:27017` | |
 | `MONGO_DB` | `otel_journey` | |
+| `COLLECTION_PREFIX` | | before every collection name (`journey_spans`), to share a database |
+| `BASE_PATH` | `/` | sub path of the UI and `/api`, behind a reverse proxy (`/journey/`) |
+| `TRACE_LINK_TEMPLATE` | | URL of a trace in your log tool, with `{traceId}`; adds a link to traces and journey steps |
+| `TRACE_LINK_LABEL` | `Abrir no log` | text of that link |
 | `OTLP_PORT` | `4318` | OTLP receiver |
 | `PORT` | `8686` | UI and API |
 | `RETENTION_DAYS` | `30` | TTL of stored records and sessions |

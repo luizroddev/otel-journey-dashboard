@@ -4,7 +4,11 @@
 // rollups are the dashboard's job, so they are not checked here.
 //
 //   npm run conformance -- --endpoint http://localhost:4318 \
-//     --mongo mongodb://localhost:27017 --db otel_journey [--header "Authorization: Bearer x"]
+//     --mongo mongodb://localhost:27017 --db otel_journey [--prefix journey_] \
+//     [--header "Authorization: Bearer x"]
+//
+// --prefix (default: COLLECTION_PREFIX) is the writer's collection prefix:
+// it then checks `journey_spans` and `journey_events`.
 //
 // A receiver that stamps device.id / overrides user.id from the
 // authenticated context passes --expect-device <id> / --expect-user <id>.
@@ -21,6 +25,7 @@ const { values } = parseArgs({
     endpoint: { type: 'string', default: 'http://localhost:4318' },
     mongo: { type: 'string', default: 'mongodb://localhost:27017' },
     db: { type: 'string', default: 'otel_journey' },
+    prefix: { type: 'string', default: process.env.COLLECTION_PREFIX ?? '' },
     header: { type: 'string', multiple: true, default: [] },
     'expect-device': { type: 'string' },
     'expect-user': { type: 'string' },
@@ -59,8 +64,8 @@ const client = new MongoClient(values.mongo!);
 await client.connect();
 try {
   const db = client.db(values.db!);
-  const events = await db.collection('events').find({ sessionId: s.sessionId }).sort({ time: 1 }).toArray();
-  const spans = await db.collection('spans').find({ sessionId: s.sessionId }).toArray();
+  const events = await db.collection(`${values.prefix}events`).find({ sessionId: s.sessionId }).sort({ time: 1 }).toArray();
+  const spans = await db.collection(`${values.prefix}spans`).find({ sessionId: s.sessionId }).toArray();
   const device = values['expect-device'] ?? null;
   const user = values['expect-user'] ?? `${installationId}-user`;
 
