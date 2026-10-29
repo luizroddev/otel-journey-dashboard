@@ -3,6 +3,33 @@ import type { FlowStatus } from './api';
 const dateTime = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'medium' });
 const time = new Intl.DateTimeFormat('pt-BR', { timeStyle: 'medium' });
 const decimal = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 });
+const integer = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
+const compact = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 1 });
+const percent1 = new Intl.NumberFormat('pt-BR', { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const hourFmt = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
+const dayFmt = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit' });
+const weekdayFmt = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+
+/** 2.878, or 486 mil from 10 thousand on. */
+export const fmtCount = (n: number) => (Math.abs(n) >= 10_000 ? compact.format(n) : integer.format(n));
+/** 6,9%. */
+export const fmtPct = (x: number) => percent1.format(x);
+/** Signed difference of two rates in percentage points: 2,1 p.p. */
+export const fmtPp = (d: number) => `${decimal.format(Math.abs(d) * 100)} p.p.`;
+/** Start of an hourly slot (14:00) or a daily one (28/10). */
+export const fmtSlot = (iso: string, slot: 'hour' | 'day') =>
+  slot === 'hour' ? hourFmt.format(new Date(iso)) : dayFmt.format(new Date(iso));
+export const fmtSlotLong = (iso: string, slot: 'hour' | 'day') =>
+  slot === 'hour'
+    ? `${dayFmt.format(new Date(iso))}, ${hourFmt.format(new Date(iso))} às ${hourFmt.format(new Date(Date.parse(iso) + 3_600_000))}`
+    : weekdayFmt.format(new Date(iso));
+/** "há 40 s", "há 3 min". */
+export function fmtAgo(iso: string, now = Date.now()): string {
+  const s = Math.max(0, Math.round((now - Date.parse(iso)) / 1000));
+  if (s < 60) return `há ${s} s`;
+  if (s < 3600) return `há ${Math.round(s / 60)} min`;
+  return `há ${decimal.format(s / 3600)} h`;
+}
 
 export const fmtDateTime = (iso: string) => dateTime.format(new Date(iso));
 export const fmtTime = (iso: string) => time.format(new Date(iso));
@@ -62,6 +89,10 @@ export function valueText(v: unknown): string {
   if (typeof v === 'object') return JSON.stringify(v);
   return String(v);
 }
+
+/** iOS 1.4.0 */
+export const versionName = (platform: string | null, version: string | null) =>
+  [platform ? platformName(platform) : null, version].filter(Boolean).join(' ') || 'desconhecida';
 
 export const platformName = (p: string) =>
   ({ ios: 'iOS', android: 'Android', darwin: 'iOS', linux: 'Android' })[p] ?? p;

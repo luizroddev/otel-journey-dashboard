@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
-import { BrowserRouter, Link, Route, Routes, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Link, NavLink, Route, Routes, useNavigate } from 'react-router-dom';
+import { OverviewPage } from './pages/Overview';
 import { SessionPage } from './pages/Session';
 import { SessionsPage } from './pages/Sessions';
 import { TracePage } from './pages/Trace';
@@ -25,7 +26,10 @@ function TopBar() {
         Jornadas
       </Link>
       <nav>
-        <Link to="/">Sessões</Link>
+        <NavLink to="/" end>
+          Visão geral
+        </NavLink>
+        <NavLink to="/sessions">Sessões</NavLink>
       </nav>
       <form className="trace-search" onSubmit={open} role="search">
         <label htmlFor="trace-search">Abrir trace</label>
@@ -48,10 +52,11 @@ export function App() {
       <TopBar />
       <main>
         <Routes>
-          <Route path="/" element={<SessionsPage />} />
+          <Route path="/" element={<OverviewPage />} />
+          <Route path="/sessions" element={<SessionsPage />} />
           <Route path="/sessions/:id" element={<SessionPage />} />
           <Route path="/traces/:traceId" element={<TracePage />} />
-          <Route path="*" element={<p className="empty">Página não encontrada. <Link to="/">Voltar às sessões</Link></p>} />
+          <Route path="*" element={<p className="empty">Página não encontrada. <Link to="/sessions">Voltar às sessões</Link></p>} />
         </Routes>
       </main>
     </BrowserRouter>

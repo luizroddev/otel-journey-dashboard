@@ -4,6 +4,7 @@ import { decodeLogs, decodeTraces } from '../server/src/otlp/decode.js';
 import { buildJourney } from '../server/src/query/journey.js';
 import { buildTrace, withContext } from '../server/src/query/trace.js';
 import { durationBucket, escapeKey, unescapeKey } from '../server/src/aggregate/aggregator.js';
+import { findChanges, percentile, periodWindow, type FlowStat } from '../server/src/query/overview.js';
 import { encode, syntheticSession } from '../scripts/lib/synthetic.js';
 
 const opts = { now: new Date('2026-10-28T12:00:00Z'), retentionDays: 30 };
@@ -218,5 +219,97 @@ describe('rollup helpers', () => {
     expect(durationBucket(51)).toBe(1);
     expect(durationBucket(980)).toBe(6);
     expect(durationBucket(10_000_000)).toBe(19);
+  });
+});
+
+describe('overview', () => {
+  it('estimates p95 from the histogram, and needs 20 values', () => {
+    const hist = Array(20).fill(0);
+    hist[0] = 100;
+    expect(percentile(hist)).toBeCloseTo(47.5);
+    hist[0] = 19;
+    expect(percentile(hist)).toBeNull();
+    const spread = Array(20).fill(0);
+    spread[6] = 95; // up to 1 s
+    spread[10] = 5; // 3 to 5 s
+    expect(percentile(spread)).toBe(1000);
+  });
+
+  it('aligns periods to hours, and days to the reader time zone', () => {
+    const now = new Date('2026-10-28T15:20:00Z');
+    const day = periodWindow({ period: '24h', compare: 'previous', timeZone: 'UTC', now });
+    expect([day.from.toISOString(), day.to.toISOString(), day.slots.length]).toEqual(['2026-10-27T16:00:00.000Z', '2026-10-28T16:00:00.000Z', 24]);
+    expect(day.shift).toBe(86_400_000);
+    expect(day.fraction).toBeCloseTo(1 / 3);
+    expect(periodWindow({ period: '24h', compare: 'week', timeZone: 'UTC', now }).shift).toBe(7 * 86_400_000);
+    const week = periodWindow({ period: '7d', compare: 'previous', timeZone: 'America/Sao_Paulo', now });
+    expect(week.slots.map((d) => d.toISOString()).slice(-2)).toEqual(['2026-10-27T03:00:00.000Z', '2026-10-28T03:00:00.000Z']);
+    expect(week.slots).toHaveLength(7);
+  });
+
+  const flow = (code: string, versions: [string, number, number, number, number][]): FlowStat => {
+    const slots = 24;
+    const byVersion = versions.map(([version, n, failure, nb, fb]) => ({
+      version,
+      platform: 'ios',
+      started: n,
+      failure,
+      before: { n: nb, failure: fb },
+      // The failures of the period all happen in its second half.
+      series: {
+        started: Array.from({ length: slots }, () => n / slots),
+        failure: Array.from({ length: slots }, (_, i) => (i >= 12 ? failure / 12 : 0)),
+      },
+    }));
+    const sum = (f: (v: (typeof byVersion)[number]) => number) => byVersion.reduce((a, v) => a + f(v), 0);
+    return {
+      code,
+      label: null,
+      started: sum((v) => v.started),
+      success: 0,
+      failure: sum((v) => v.failure),
+      cancelled: 0,
+      completed: 0,
+      open: 0,
+      p95Ms: null,
+      before: { started: sum((v) => v.before.n), failure: sum((v) => v.before.failure), open: 0, p95Ms: null },
+      series: {
+        started: Array.from({ length: slots }, (_, i) => sum((v) => v.series.started[i]!)),
+        failure: Array.from({ length: slots }, (_, i) => sum((v) => v.series.failure[i]!)),
+        ended: Array(slots).fill(0),
+      },
+      reasons: [],
+      byVersion,
+    };
+  };
+  const slots = Array.from({ length: 24 }, (_, i) => new Date(Date.UTC(2026, 9, 28, i)));
+  const reason = (version: string, r: string, n: number) => ({ kind: 'flow', code: 'login', version, platform: 'ios', outcome: 'failure' as const, reason: r, errorType: null, n });
+
+  it('finds a worse flow, the version behind it, the reason that grew and when it started', () => {
+    const login = flow('login', [
+      ['1.4.0', 1000, 160, 1000, 40],
+      ['1.3.2', 1000, 40, 1000, 40],
+    ]);
+    const steady = flow('checkout', [['1.4.0', 1000, 30, 1000, 31]]);
+    const changes = findChanges([login, steady], [], slots, {
+      now: [reason('1.4.0', 'blockedAccount', 120), reason('1.4.0', 'invalidPassword', 40)],
+      before: [reason('1.4.0', 'blockedAccount', 10), reason('1.4.0', 'invalidPassword', 30)],
+    }, 200);
+    expect(changes).toHaveLength(1);
+    const c = changes[0]!;
+    if (c.type !== 'failure') throw new Error('expected a failure change');
+    expect([c.direction, c.code, c.where?.version]).toEqual(['worse', 'login', '1.4.0']);
+    expect(c.where!.share).toBeCloseTo(1);
+    expect(c.reason).toMatchObject({ reason: 'blockedAccount', beforeScope: 'version', shareBefore: 0.25, shareNow: 0.75 });
+    expect(c.since).toBe('2026-10-28T12:00:00.000Z');
+  });
+
+  it('ignores small groups and noise, and reports slower actions', () => {
+    const small = flow('login', [['1.4.0', 100, 16, 100, 4]]);
+    const noise = flow('checkout', [['1.4.0', 1000, 44, 1000, 40]]);
+    const action = (p95Ms: number, before: number) => ({ code: 'pay', label: 'Pagou', n: 1000, failure: 0, measured: 1000, p95Ms, before: { n: 1000, failure: 0, measured: 1000, p95Ms: before } });
+    expect(findChanges([small, noise], [action(1100, 1000)], slots, { now: [], before: [] }, 200)).toEqual([]);
+    const [slower] = findChanges([], [action(3400, 1900)], slots, { now: [], before: [] }, 200);
+    expect(slower).toMatchObject({ type: 'duration', direction: 'worse', code: 'pay' });
   });
 });

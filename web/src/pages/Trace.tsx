@@ -13,7 +13,7 @@ export function TracePage() {
     return (
       <div className="page empty">
         <p>{trace.error.message === 'not found' ? 'Nenhum span ou evento com este trace id.' : `Não foi possível carregar: ${trace.error.message}.`}</p>
-        <Link to="/">Voltar às sessões</Link>
+        <Link to="/sessions">Voltar às sessões</Link>
       </div>
     );
 
@@ -23,7 +23,7 @@ export function TracePage() {
     <div className="page">
       <div className="page-head">
         <p className="crumb">
-          <Link to="/">Sessões</Link>
+          <Link to="/sessions">Sessões</Link>
           {sessionId && (
             <>
               {' / '}
