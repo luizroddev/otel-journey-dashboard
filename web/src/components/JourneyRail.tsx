@@ -12,9 +12,20 @@ export function lineColor(flowCode: string | null, codes: string[]): string {
   return LINE_COLORS[(i < 0 ? 0 : i) % LINE_COLORS.length]!;
 }
 
+// `device.app.lifecycle`: the user leaving the app and coming back.
+const lifecycleText: Record<string, string> = {
+  background: 'Saiu do app',
+  foreground: 'Voltou ao app',
+  terminate: 'App encerrado',
+  active: 'App ativo',
+  inactive: 'App inativo',
+  created: 'App aberto',
+};
+
 export function stepTitle(s: JourneyStep): string {
   if (s.label) return s.label;
   if (s.kind === 'session') return s.previousSessionId ? 'Nova sessão, continua a anterior' : 'Início da sessão';
+  if (s.kind === 'lifecycle') return lifecycleText[s.code ?? ''] ?? `App: ${s.code ?? 'mudou de estado'}`;
   if (s.kind === 'event') return s.eventName ?? 'Evento';
   return humanize(s.code);
 }

@@ -124,14 +124,17 @@ describe('decode and map', () => {
 
   it('the receiver is the only source of deviceId and can override the user', () => {
     const s = session();
-    const plain = mapLogs(decodeLogs(encode('logs', s.logs), 'protobuf'), opts);
+    const decoded = () => decodeLogs(encode('logs', s.logs), 'protobuf');
+    const plain = mapLogs(decoded(), opts);
     expect(plain.every((e) => e.deviceId === null)).toBe(true);
-    const events = mapLogs(decodeLogs(encode('logs', s.logs), 'protobuf'), {
-      ...opts,
-      identity: { deviceId: 'validated-device', userId: null },
-    });
+    const events = mapLogs(decoded(), { ...opts, identity: { deviceId: 'validated-device', userId: 'validated-user' } });
     expect(new Set(events.map((e) => e.deviceId))).toEqual(new Set(['validated-device']));
-    expect(events.every((e) => e.userId === null)).toBe(true);
+    // The authenticated user replaces the payload's only after the login.
+    plain.forEach((p, i) => expect(events[i]!.userId).toBe(p.userId === null ? null : 'validated-user'));
+    expect(events.some((e) => e.userId === null) && events.some((e) => e.userId === 'validated-user')).toBe(true);
+    // Without the header, the payload's value stays.
+    const noHeader = mapLogs(decoded(), { ...opts, identity: { deviceId: 'validated-device', userId: null } });
+    expect(noHeader.map((e) => e.userId)).toEqual(plain.map((e) => e.userId));
   });
 });
 
@@ -169,6 +172,19 @@ describe('journey', () => {
     expect(view.steps[0]!.previousSessionId).toBe('a'.repeat(32));
     // The session start is not a step of any flow.
     expect(login.steps).toBe(5);
+  });
+
+  it('the user leaving the app is a lifecycle step inside the flow', () => {
+    const { view } = build({ wrongPasswordFirst: true, leavesApp: true });
+    const lifecycle = view.steps.filter((s) => s.kind === 'lifecycle');
+    expect(lifecycle.map((s) => [s.code, s.source])).toEqual([
+      ['background', 'native'],
+      ['foreground', 'native'],
+    ]);
+    expect(lifecycle.every((s) => s.flow === 'login' && s.extra.length === 0)).toBe(true);
+    // Between the failed attempt and the retry.
+    const kinds = view.steps.map((s) => (s.kind === 'lifecycle' ? s.code : s.code === 'retry' ? 'retry' : null));
+    expect(kinds.filter(Boolean)).toEqual(['background', 'foreground', 'retry']);
   });
 
   it('a flow without an end is open, never abandoned', () => {

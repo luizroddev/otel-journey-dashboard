@@ -125,7 +125,7 @@ and writes MongoDB): [docs/backend-integration.md](docs/backend-integration.md).
 | `MAX_JOURNEY_EVENTS` / `MAX_TRACE_SPANS` | `5000` / `2000` | per view; the UI says when it hit them |
 | `INGEST_TOKEN` | | require `Authorization: Bearer` on ingestion |
 | `API_TOKEN` | | require it on `/api` (UI: `localStorage.apiToken`) |
-| `TRUSTED_DEVICE_HEADER` / `TRUSTED_USER_HEADER` | | headers from a trusted proxy: the device header is the only source of `deviceId`; the user header replaces `user.id` |
+| `TRUSTED_DEVICE_HEADER` / `TRUSTED_USER_HEADER` | | headers from a trusted proxy: the device header is the only source of `deviceId`; the user header replaces `user.id` on records that carry one (events before the login keep none) |
 
 The defaults are examples for local use, not a production policy.
 

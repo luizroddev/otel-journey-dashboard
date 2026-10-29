@@ -29,6 +29,7 @@ const KIND_TEXT: Record<JourneyStep['kind'], string> = {
   action: 'Ação',
   flowStart: 'Início de fluxo',
   flowEnd: 'Fim de fluxo',
+  lifecycle: 'Estado do app',
   event: 'Evento',
 };
 
@@ -296,6 +297,8 @@ function StepDetail({ step, run, start, lineColor: color }: { step: JourneyStep;
               ? 'Ação pontual: não tem duração nem trace.'
               : step.kind === 'session'
                 ? 'O início de uma sessão não tem árvore de spans.'
+                : step.kind === 'lifecycle'
+                  ? 'Mudança de estado do app, registrada pelo sistema: não tem árvore de spans.'
                 : 'Este acontecimento não estava dentro de uma operação medida, então não há árvore de spans.'}
           </p>
         )}
