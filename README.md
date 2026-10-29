@@ -110,6 +110,7 @@ stack, in the library repository (Portuguese):
 
 | | |
 |---|---|
+| [docs/architecture.md](docs/architecture.md) | How it works, in diagrams: modes, where it runs, receiving, the aggregator, collections, pages and how a journey is built |
 | [docs/storage-schema.md](docs/storage-schema.md) | MongoDB collections, fields and indexes: what a writer inserts, what the dashboard derives |
 | [docs/query-api.md](docs/query-api.md) | The JSON API the UI reads |
 | `npm run conformance` | Sends a fictional session to a receiver and checks what it stored (29 checks) |
